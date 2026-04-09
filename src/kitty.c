@@ -33,7 +33,11 @@ static char *base64_encode(const char *data, size_t input_length) {
 }
 
 void kitty_render_frame(const uint8_t *rgb, uint32_t width, uint32_t height, bool is_first_frame) {
-    const char *filepath = "/tmp/kgp-frame.rgb";
+    static int frame_count = 0;
+    char filepath[64];
+    snprintf(filepath, sizeof(filepath), "/tmp/kgp-frame-%d.rgb", (frame_count % 2) + 1);
+    frame_count++;
+
     FILE *f = fopen(filepath, "wb");
     if (!f) {
         perror("fopen");
@@ -46,11 +50,12 @@ void kitty_render_frame(const uint8_t *rgb, uint32_t width, uint32_t height, boo
     if (!path_b64) return;
 
     // a=T: transmit and display
+    // i=1: fixed image ID to replace previous one
     // f=24: RGB24
     // t=f: payload is file path
     // s, v: width, height
     // q=2: suppress response
-    printf("\033_Ga=T,f=24,t=f,s=%u,v=%u,q=2;%s\033\\", width, height, path_b64);
+    printf("\033_Ga=T,i=1,f=24,t=f,s=%u,v=%u,q=2;%s\033\\", width, height, path_b64);
     fflush(stdout);
 
     free(path_b64);

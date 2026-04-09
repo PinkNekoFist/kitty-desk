@@ -41,7 +41,6 @@ static void handle_buffer(void *data, struct zwlr_screencopy_frame_v1 *frame,
     ctx->height = height;
     ctx->stride = stride;
     ctx->buffer_info_received = true;
-    fprintf(stderr, "[debug] buffer event: %ux%u format=%u stride=%u\n", width, height, format, stride);
 }
 
 static void handle_flags(void *data, struct zwlr_screencopy_frame_v1 *frame, uint32_t flags) {}
@@ -129,11 +128,18 @@ int capture_frame(struct capture_ctx *ctx, uint8_t **rgb_out, uint32_t *width, u
         return -1;
     }
 
-    // Allocate SHM buffer
-    if (create_shm_buffer(ctx) < 0) {
-        fprintf(stderr, "[debug] failed to create shm buffer\n");
-        zwlr_screencopy_frame_v1_destroy(frame);
-        return -1;
+    // Allocate SHM buffer only if needed or size changed
+    size_t required_size = ctx->stride * ctx->height;
+    if (!ctx->data || ctx->data_size < required_size) {
+        if (ctx->data) {
+            munmap(ctx->data, ctx->data_size);
+            close(ctx->fd);
+        }
+        if (create_shm_buffer(ctx) < 0) {
+            fprintf(stderr, "[debug] failed to create shm buffer\n");
+            zwlr_screencopy_frame_v1_destroy(frame);
+            return -1;
+        }
     }
 
     struct wl_shm_pool *pool = wl_shm_create_pool(ctx->shm, ctx->fd, ctx->data_size);
@@ -155,10 +161,7 @@ int capture_frame(struct capture_ctx *ctx, uint8_t **rgb_out, uint32_t *width, u
         return -1;
     }
 
-    fprintf(stderr, "[debug] frame ready, converting...\n");
-
     // Convert XRGB8888 to RGB24
-    // Little-endian XRGB8888 is B, G, R, X
     uint8_t *rgb = malloc(ctx->width * ctx->height * 3);
     for (uint32_t y = 0; y < ctx->height; y++) {
         for (uint32_t x = 0; x < ctx->width; x++) {

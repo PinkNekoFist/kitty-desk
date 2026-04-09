@@ -1,39 +1,50 @@
+#define _DEFAULT_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <signal.h>
+#include <stdbool.h>
 #include "capture.h"
 #include "kitty.h"
 
+static volatile bool running = true;
+
+static void handle_sigint(int sig) {
+    running = false;
+}
+
 int main() {
+    signal(SIGINT, handle_sigint);
+
     struct capture_ctx ctx;
     if (capture_init(&ctx) < 0) {
         fprintf(stderr, "Failed to initialize capture\n");
         return 1;
     }
 
-    printf("Capturing single frame...\n");
+    printf("Starting continuous frame capture. Press Ctrl+C to stop.\n");
 
-    uint8_t *rgb = NULL;
     uint32_t width, height;
-    if (capture_frame(&ctx, &rgb, &width, &height) < 0) {
-        fprintf(stderr, "Failed to capture frame\n");
-        capture_cleanup(&ctx);
-        return 1;
+    bool first = true;
+
+    while (running) {
+        uint8_t *rgb = NULL;
+        if (capture_frame(&ctx, &rgb, &width, &height) < 0) {
+            fprintf(stderr, "Failed to capture frame\n");
+            break;
+        }
+
+        kitty_render_frame(rgb, width, height, first);
+        first = false;
+
+        free(rgb);
+        
+        // Cap to ~30 FPS for PoC
+        usleep(33333); 
     }
 
-    printf("Frame captured: %ux%u. Sending to Kitty...\n", width, height);
-
-    kitty_render_frame(rgb, width, height, true);
-
-    // Give it a moment to render before we exit (though t=f is synchronous for the file write)
-    sleep(1);
-
-    // Note: Step 1 doesn't say we MUST cleanup immediately, but we should probably 
-    // leave the image there to "verify" it. 
-    // If we call kitty_cleanup(), it might disappear instantly.
-    // The user can run it again or we can let them see it.
-    
-    free(rgb);
+    printf("\nCleaning up...\n");
+    kitty_cleanup();
     capture_cleanup(&ctx);
 
     printf("Done.\n");

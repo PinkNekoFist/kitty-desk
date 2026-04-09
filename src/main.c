@@ -24,7 +24,7 @@ int main() {
 
     uint32_t width, height;
     uint8_t *rgb = NULL;
-    renderer_t *renderer = NULL;
+    renderer_t *renderer = renderer_create();
 
     printf("Starting continuous frame capture. Press Ctrl+C to stop.\n");
 
@@ -34,21 +34,11 @@ int main() {
             break;
         }
 
-        if (!renderer) {
-            renderer = renderer_create(width, height);
-            if (!renderer) {
-                fprintf(stderr, "Failed to create renderer\n");
-                free(rgb);
-                break;
-            }
-        }
-
-        renderer_render_frame(renderer, rgb);
+        renderer_render_frame(renderer, rgb, width, height);
 
         free(rgb);
         rgb = NULL;
         
-        // Cap to ~30 FPS
         usleep(33333); 
     }
 

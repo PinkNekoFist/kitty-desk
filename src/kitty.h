@@ -3,8 +3,12 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
-void kitty_render_frame(const uint8_t *rgb, uint32_t width, uint32_t height, bool is_first_frame);
-void kitty_cleanup();
+typedef struct renderer renderer_t;
+
+renderer_t *renderer_create(uint32_t width, uint32_t height);
+void renderer_destroy(renderer_t *r);
+void renderer_render_frame(renderer_t *r, const uint8_t *rgb);
 
 #endif

@@ -22,29 +22,38 @@ int main() {
         return 1;
     }
 
+    uint32_t width, height;
+    uint8_t *rgb = NULL;
+    renderer_t *renderer = NULL;
+
     printf("Starting continuous frame capture. Press Ctrl+C to stop.\n");
 
-    uint32_t width, height;
-    bool first = true;
-
     while (running) {
-        uint8_t *rgb = NULL;
         if (capture_frame(&ctx, &rgb, &width, &height) < 0) {
             fprintf(stderr, "Failed to capture frame\n");
             break;
         }
 
-        kitty_render_frame(rgb, width, height, first);
-        first = false;
+        if (!renderer) {
+            renderer = renderer_create(width, height);
+            if (!renderer) {
+                fprintf(stderr, "Failed to create renderer\n");
+                free(rgb);
+                break;
+            }
+        }
+
+        renderer_render_frame(renderer, rgb);
 
         free(rgb);
+        rgb = NULL;
         
-        // Cap to ~30 FPS for PoC
+        // Cap to ~30 FPS
         usleep(33333); 
     }
 
     printf("\nCleaning up...\n");
-    kitty_cleanup();
+    if (renderer) renderer_destroy(renderer);
     capture_cleanup(&ctx);
 
     printf("Done.\n");

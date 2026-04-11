@@ -30,6 +30,10 @@ struct capture_ctx {
     // RGB buffer for reuse
     uint8_t *rgb_buf;
     size_t rgb_buf_size;
+
+    // Previous RGB buffer for diffing
+    uint8_t *prev_rgb;
+    size_t prev_rgb_size;
 };
 
 int capture_init(struct capture_ctx *ctx);

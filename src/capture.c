@@ -115,6 +115,7 @@ void capture_cleanup(struct capture_ctx *ctx) {
     if (ctx->registry) wl_registry_destroy(ctx->registry);
     if (ctx->display) wl_display_disconnect(ctx->display);
     if (ctx->rgb_buf) free(ctx->rgb_buf);
+    if (ctx->prev_rgb) free(ctx->prev_rgb);
 }
 
 int capture_frame(struct capture_ctx *ctx, uint8_t **rgb_out, uint32_t *width, uint32_t *height) {
@@ -190,6 +191,14 @@ int capture_frame(struct capture_ctx *ctx, uint8_t **rgb_out, uint32_t *width, u
     }
 
     double t_conv_done = get_time_ms();
+
+    // Ensure prev_rgb is allocated
+    if (!ctx->prev_rgb || ctx->prev_rgb_size < rgb_size) {
+        ctx->prev_rgb = realloc(ctx->prev_rgb, rgb_size);
+        ctx->prev_rgb_size = rgb_size;
+        memset(ctx->prev_rgb, 0, rgb_size);
+    }
+
     static int frame_count = 0;
     if (++frame_count % 30 == 0) {
         fprintf(stderr, "Capture info: Copy: %.2f ms, Conv: %.2f ms, Total wait: %.2f ms\n", 

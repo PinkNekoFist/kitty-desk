@@ -38,13 +38,8 @@ struct kitty_renderer *kitty_renderer_create(int rows, int cols) {
     r->screen_cols = cols;
     update_term_size(r);
 
-    // Initial buffer sizes (can be reallocated if needed)
-    // 3840 * 2160 * 3 = 24,883,200 bytes
-    // base64: ~33 MB
     r->encode_buf_size = 35 * 1024 * 1024; 
     r->encode_buf = malloc(r->encode_buf_size);
-    
-    // protocol_buf needs to accommodate headers and base64
     r->protocol_buf_size = 40 * 1024 * 1024;
     r->protocol_buf = malloc(r->protocol_buf_size);
 
@@ -53,7 +48,6 @@ struct kitty_renderer *kitty_renderer_create(int rows, int cols) {
         return NULL;
     }
 
-    // Clear screen
     printf("\033[H\033[2J");
     fflush(stdout);
 
@@ -62,11 +56,8 @@ struct kitty_renderer *kitty_renderer_create(int rows, int cols) {
 
 void kitty_renderer_destroy(struct kitty_renderer *r) {
     if (!r) return;
-    // Delete image in Kitty
     printf("\033_Ga=d,q=2,i=%ld;\033\\", r->kitty_id);
-    // Restore screen
     printf("\033[H\033[2J");
-    // Restore window title
     printf("\033]2;\033\\");
     fflush(stdout);
 
@@ -75,8 +66,8 @@ void kitty_renderer_destroy(struct kitty_renderer *r) {
     free(r);
 }
 
-void kitty_render_frame(struct kitty_renderer *r, const uint8_t *rgb, uint32_t width, uint32_t height) {
-    size_t raw_size = width * height * 3;
+void kitty_render_frame(struct kitty_renderer *r, const uint8_t *rgb, uint32_t width, uint32_t height, struct dirty_rect rect) {
+    size_t raw_size = rect.w * rect.h * 3;
     size_t required_encode_size = 4 * ((raw_size + 2) / 3) + 1;
     
     if (required_encode_size > r->encode_buf_size) {
@@ -96,8 +87,8 @@ void kitty_render_frame(struct kitty_renderer *r, const uint8_t *rgb, uint32_t w
 
         char header[128];
         int header_len;
-        if (r->frame_number == 0) {
-            // First frame: a=T
+        if (r->frame_number == 0 || rect.full_frame) {
+            // Use T for full frame or first frame
             if (b_off == 0) {
                 header_len = sprintf(header, "\033_Ga=T,i=%ld,f=24,s=%u,v=%u,q=2,c=%d,r=%d,m=%d;", 
                                      r->kitty_id, width, height, r->screen_cols, r->screen_rows, m);
@@ -105,16 +96,15 @@ void kitty_render_frame(struct kitty_renderer *r, const uint8_t *rgb, uint32_t w
                 header_len = sprintf(header, "\033_Gm=%d;", m);
             }
         } else {
-            // Subsequent frames: a=f
+            // Subsequent frames: a=f with dirty rect info
             if (b_off == 0) {
-                header_len = sprintf(header, "\033_Ga=f,r=1,i=%ld,f=24,q=2,x=0,y=0,s=%u,v=%u,m=%d;", 
-                                     r->kitty_id, width, height, m);
+                header_len = sprintf(header, "\033_Ga=f,r=1,i=%ld,f=24,q=2,x=%u,y=%u,s=%u,v=%u,m=%d;", 
+                                     r->kitty_id, rect.x, rect.y, rect.w, rect.h, m);
             } else {
                 header_len = sprintf(header, "\033_Ga=f,r=1,q=2,m=%d;", m);
             }
         }
 
-        // Ensure protocol_buf has enough space
         if (p_off + header_len + chunk_len + 2 > r->protocol_buf_size) {
              r->protocol_buf_size = p_off + header_len + chunk_len + 1024 * 1024;
              r->protocol_buf = realloc(r->protocol_buf, r->protocol_buf_size);
@@ -130,7 +120,7 @@ void kitty_render_frame(struct kitty_renderer *r, const uint8_t *rgb, uint32_t w
         b_off += chunk_len;
     }
 
-    // Trigger display after each frame (required for animation)
+    // Trigger display after each frame
     if (r->frame_number > 0) {
         char anim_cmd[64];
         int anim_len = sprintf(anim_cmd, "\033_Ga=a,q=2,c=1,i=%ld;\033\\", r->kitty_id);

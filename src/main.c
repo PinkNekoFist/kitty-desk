@@ -24,7 +24,12 @@ int main() {
 
     uint32_t width, height;
     uint8_t *rgb = NULL;
-    renderer_t *renderer = renderer_create();
+    struct kitty_renderer *renderer = kitty_renderer_create(0, 0); // Auto-detect size
+    if (!renderer) {
+        fprintf(stderr, "Failed to create renderer\n");
+        capture_cleanup(&ctx);
+        return 1;
+    }
 
     printf("Starting continuous frame capture. Press Ctrl+C to stop.\n");
 
@@ -34,16 +39,13 @@ int main() {
             break;
         }
 
-        renderer_render_frame(renderer, rgb, width, height);
-
-        free(rgb);
-        rgb = NULL;
+        kitty_render_frame(renderer, rgb, width, height);
         
-        usleep(33333); 
+        // No usleep here for max performance
     }
 
     printf("\nCleaning up...\n");
-    if (renderer) renderer_destroy(renderer);
+    if (renderer) kitty_renderer_destroy(renderer);
     capture_cleanup(&ctx);
 
     printf("Done.\n");

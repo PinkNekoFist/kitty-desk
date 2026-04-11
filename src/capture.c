@@ -6,7 +6,14 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <time.h>
 #include "capture.h"
+
+static double get_time_ms() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0;
+}
 
 // --- Registry ---
 
@@ -107,9 +114,11 @@ void capture_cleanup(struct capture_ctx *ctx) {
     if (ctx->output) wl_output_destroy(ctx->output);
     if (ctx->registry) wl_registry_destroy(ctx->registry);
     if (ctx->display) wl_display_disconnect(ctx->display);
+    if (ctx->rgb_buf) free(ctx->rgb_buf);
 }
 
 int capture_frame(struct capture_ctx *ctx, uint8_t **rgb_out, uint32_t *width, uint32_t *height) {
+    double t_start = get_time_ms();
     struct zwlr_screencopy_frame_v1 *frame = zwlr_screencopy_manager_v1_capture_output(ctx->screencopy_manager, 0, ctx->output);
     zwlr_screencopy_frame_v1_add_listener(frame, &frame_listener, ctx);
 
@@ -161,19 +170,33 @@ int capture_frame(struct capture_ctx *ctx, uint8_t **rgb_out, uint32_t *width, u
         return -1;
     }
 
+    double t_copy_done = get_time_ms();
+
     // Convert XRGB8888 to RGB24
-    uint8_t *rgb = malloc(ctx->width * ctx->height * 3);
+    size_t rgb_size = ctx->width * ctx->height * 3;
+    if (!ctx->rgb_buf || ctx->rgb_buf_size < rgb_size) {
+        ctx->rgb_buf = realloc(ctx->rgb_buf, rgb_size);
+        ctx->rgb_buf_size = rgb_size;
+    }
+
     for (uint32_t y = 0; y < ctx->height; y++) {
         for (uint32_t x = 0; x < ctx->width; x++) {
             uint8_t *src = ctx->data + y * ctx->stride + x * 4;
-            uint8_t *dst = rgb + (y * ctx->width + x) * 3;
+            uint8_t *dst = ctx->rgb_buf + (y * ctx->width + x) * 3;
             dst[0] = src[2]; // R
             dst[1] = src[1]; // G
             dst[2] = src[0]; // B
         }
     }
 
-    *rgb_out = rgb;
+    double t_conv_done = get_time_ms();
+    static int frame_count = 0;
+    if (++frame_count % 30 == 0) {
+        fprintf(stderr, "Capture info: Copy: %.2f ms, Conv: %.2f ms, Total wait: %.2f ms\n", 
+                t_copy_done - t_start, t_conv_done - t_copy_done, t_conv_done - t_start);
+    }
+
+    *rgb_out = ctx->rgb_buf;
     *width = ctx->width;
     *height = ctx->height;
 

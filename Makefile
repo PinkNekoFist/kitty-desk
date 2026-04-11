@@ -6,7 +6,7 @@ PROTO_XML = proto/wlr-screencopy-unstable-v1.xml
 PROTO_HDR = proto/wlr-screencopy-unstable-v1-client-protocol.h
 PROTO_SRC = proto/wlr-screencopy-unstable-v1-client-protocol.c
 
-OBJS = src/main.o src/capture.o src/kitty.o $(PROTO_SRC:.c=.o)
+OBJS = src/main.o src/capture.o src/kitty.o src/base64.o $(PROTO_SRC:.c=.o)
 TARGET = kgp-test-bin
 
 all: $(TARGET)

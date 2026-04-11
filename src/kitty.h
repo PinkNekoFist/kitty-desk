@@ -5,10 +5,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-typedef struct renderer renderer_t;
+struct kitty_renderer;
 
-renderer_t *renderer_create();
-void renderer_destroy(renderer_t *r);
-void renderer_render_frame(renderer_t *r, const uint8_t *rgb, uint32_t src_w, uint32_t src_h);
+struct kitty_renderer *kitty_renderer_create(int rows, int cols);
+void kitty_renderer_destroy(struct kitty_renderer *r);
+void kitty_render_frame(struct kitty_renderer *r, const uint8_t *rgb, uint32_t width, uint32_t height);
 
 #endif

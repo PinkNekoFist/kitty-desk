@@ -26,6 +26,10 @@ struct capture_ctx {
     int fd;
     uint8_t *data;
     size_t data_size;
+
+    // RGB buffer for reuse
+    uint8_t *rgb_buf;
+    size_t rgb_buf_size;
 };
 
 int capture_init(struct capture_ctx *ctx);

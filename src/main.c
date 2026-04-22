@@ -62,6 +62,11 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    if (verbose) {
+        fprintf(stderr, "[kgp-server] Started (verbose: ON)\n");
+        fflush(stderr);
+    }
+
     signal(SIGINT, handle_sigint);
     signal(SIGPIPE, SIG_IGN); // Handle SSH disconnect gracefully
 

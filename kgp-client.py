@@ -16,46 +16,49 @@ import re
 _decompress = None
 try:
     import zstandard
+
     _dctx = zstandard.ZstdDecompressor()
     _decompress = _dctx.decompress
 except ImportError:
     try:
         import zstd
+
         _decompress = zstd.decompress
     except ImportError:
         pass
 
-MAGIC    = b'KGPF'
-HDR_FMT  = '>4sBBIHHHHHHI'
+MAGIC = b"KGPF"
+HDR_FMT = ">4sBBIHHHHHHI"
 HDR_SIZE = struct.calcsize(HDR_FMT)  # 26 bytes
 
 FLAG_FULL_FRAME = 0x01
 FLAG_COMPRESSED = 0x02
-FLAG_SKIP       = 0x04
+FLAG_SKIP = 0x04
 
 CHUNK_SIZE = 4096
 
-INPUT_FMT = '>BBiHH'   # type, flags, code, mx, my (10 bytes)
-INPUT_KEY   = 1
+INPUT_FMT = ">BBiHH"  # type, flags, code, mx, my (10 bytes)
+INPUT_KEY = 1
 INPUT_MOUSE = 2
 
 SETUP = (
-    b'\033[?1049h'    # Alternate screen
-    b'\033[2J'        # Clear screen
-    b'\033[H'         # Cursor to home
-    b'\033[?25l'      # Hide cursor
-    b'\033[?1003h'    # Any motion mouse tracking
-    b'\033[?1006h'    # SGR 1006 mouse encoding
-    b'\033[>11u'      # Kitty Keyboard Protocol
+    b"\033[?1049h"  # Alternate screen
+    b"\033[2J"  # Clear screen
+    b"\033[H"  # Cursor to home
+    b"\033[?25l"  # Hide cursor
+    b"\033[?1003h"  # Any motion mouse tracking
+    b"\033[?1006h"  # SGR 1006 mouse encoding
+    b"\033[>11u"  # Kitty Keyboard Protocol
 )
 
 TEARDOWN = (
-    b'\033[<u'        # Restore keyboard protocol
-    b'\033[?1003l'    # Stop mouse tracking
-    b'\033[?1006l'
-    b'\033[?25h'      # Show cursor
-    b'\033[?1049l'    # Back to main screen
+    b"\033[<u"  # Restore keyboard protocol
+    b"\033[?1003l"  # Stop mouse tracking
+    b"\033[?1006l"
+    b"\033[?25h"  # Show cursor
+    b"\033[?1049l"  # Back to main screen
 )
+
 
 class Frame:
     def __init__(self, x, y, w, h, fw, fh, seq, flags, rgb24):
@@ -66,14 +69,16 @@ class Frame:
         self.is_skip = bool(flags & FLAG_SKIP)
         self.rgb24 = rgb24
 
+
 def recv_exactly(stream, n):
-    buf = b''
+    buf = b""
     while len(buf) < n:
         chunk = stream.read(n - len(buf))
         if not chunk:
-            raise EOFError('SSH connection closed')
+            raise EOFError("SSH connection closed")
         buf += chunk
     return buf
+
 
 def read_frame(stream):
     # Search for MAGIC word "KGPF" to sync with the stream, skipping any noise
@@ -81,11 +86,11 @@ def read_frame(stream):
     while magic_buf != MAGIC:
         chunk = stream.read(1)
         if not chunk:
-            raise EOFError('SSH connection closed')
+            raise EOFError("SSH connection closed")
         magic_buf = (magic_buf + chunk)[-4:]
 
     # Read the rest of the header (26 bytes total - 4 bytes MAGIC)
-    hdr_rest_fmt = '>BBIHHHHHHI'
+    hdr_rest_fmt = ">BBIHHHHHHI"
     hdr_rest_size = struct.calcsize(hdr_rest_fmt)
     hdr_data = recv_exactly(stream, hdr_rest_size)
     ver, flags, seq, x, y, w, h, fw, fh, dsize = struct.unpack(hdr_rest_fmt, hdr_data)
@@ -95,12 +100,15 @@ def read_frame(stream):
         data = recv_exactly(stream, dsize)
         if flags & FLAG_COMPRESSED:
             if _decompress is None:
-                raise RuntimeError("zstd or zstandard module not installed. Please install python-zstandard.")
+                raise RuntimeError(
+                    "zstd or zstandard module not installed. Please install python-zstandard."
+                )
             rgb24 = _decompress(data)
         else:
             rgb24 = data
-    
+
     return Frame(x, y, w, h, fw, fh, seq, flags, rgb24)
+
 
 class KittyRenderer:
     def __init__(self, rows, cols, cell_w, cell_h):
@@ -122,92 +130,112 @@ class KittyRenderer:
         first_chunk = True
 
         while offset < total:
-            chunk = encoded[offset:offset + CHUNK_SIZE]
+            chunk = encoded[offset : offset + CHUNK_SIZE]
             more = 1 if offset + CHUNK_SIZE < total else 0
 
             if first_chunk:
                 if self.frame_number == 0 or frame.is_full:
                     # Create/Replace image
-                    hdr = (f'\033_Ga=T,i={self.kitty_id},f=24,q=2,'
-                           f'c={self.cols},r={self.rows},'
-                           f's={frame.w},v={frame.h},m={more};')
+                    hdr = (
+                        f"\033_Ga=T,i={self.kitty_id},f=24,q=2,"
+                        f"c={self.cols},r={self.rows},"
+                        f"s={frame.w},v={frame.h},m={more};"
+                    )
                 else:
                     # Update dirty rect
                     cx = frame.x // self.cell_w
                     cy = frame.y // self.cell_h
-                    hdr = (f'\033_Ga=f,r=1,i={self.kitty_id},f=24,q=2,'
-                           f'x={cx},y={cy},'
-                           f's={frame.w},v={frame.h},m={more};')
+                    hdr = (
+                        f"\033_Ga=f,r=1,i={self.kitty_id},f=24,q=2,"
+                        f"x={cx},y={cy},"
+                        f"s={frame.w},v={frame.h},m={more};"
+                    )
                 first_chunk = False
             else:
                 if self.frame_number == 0 or frame.is_full:
-                    hdr = f'\033_Gm={more};'
+                    hdr = f"\033_Gm={more};"
                 else:
-                    hdr = f'\033_Ga=f,r=1,q=2,m={more};'
+                    hdr = f"\033_Ga=f,r=1,q=2,m={more};"
 
-            self.out.write(hdr.encode() + chunk + b'\033\\')
+            self.out.write(hdr.encode() + chunk + b"\033\\")
             offset += CHUNK_SIZE
 
         if self.frame_number > 0 and not frame.is_full:
-            self.out.write(f'\033_Ga=a,q=2,c=1,i={self.kitty_id};\033\\'.encode())
+            self.out.write(f"\033_Ga=a,q=2,c=1,i={self.kitty_id};\033\\".encode())
 
         self.out.flush()
         self.frame_number += 1
 
     def destroy(self):
-        self.out.write(f'\033_Ga=d,q=2,i={self.kitty_id};\033\\'.encode())
+        self.out.write(f"\033_Ga=d,q=2,i={self.kitty_id};\033\\".encode())
         self.out.flush()
+
 
 class KittyInputParser:
     def parse(self, data: bytes) -> list:
         events = []
-        try:
-            buf = data.decode('utf-8', errors='replace')
-        except:
-            return []
-        
         i = 0
-        while i < len(buf):
-            if buf[i] == '\x1b' and i + 1 < len(buf) and buf[i+1] == '[':
+        while i < len(data):
+            if data[i] == 0x1B and i + 1 < len(data) and data[i + 1] == ord("["):
+                # CSI sequence
                 end = i + 2
-                while end < len(buf) and buf[end] not in 'ABCDEFGHIJKLMPSTXZabcdefghijklmnopqrstuvwxyz~u':
+                while (
+                    end < len(data)
+                    and chr(data[end])
+                    not in "ABCDEFGHIJKLMPSTXZabcdefghijklmnopqrstuvwxyz~u"
+                ):
                     end += 1
-                if end < len(buf):
-                    seq = buf[i:end+1]
+                if end < len(data):
+                    seq = data[i : end + 1].decode("utf-8", errors="replace")
                     ev = self._parse_csi(seq)
-                    if ev: events.append(ev)
+                    if ev:
+                        events.append(ev)
                     i = end + 1
                 else:
                     i += 1
             else:
+                # Raw ASCII character
+                ch = data[i]
+                events.append(
+                    {"type": "key", "flags": 0x01, "code": ch}
+                )  # Assume Press
+                events.append(
+                    {"type": "key", "flags": 0x00, "code": ch}
+                )  # Immediate Release for raw ASCII
                 i += 1
         return events
 
     def _parse_csi(self, seq):
-        if seq.endswith('u'):
+        if seq.endswith("u"):
             inner = seq[2:-1]
-            parts = inner.split(';')
+            parts = inner.split(";")
             codepoint = int(parts[0]) if parts[0] else 0
             event_type = 1
-            if len(parts) > 1 and ':' in parts[1]:
-                m, e = parts[1].split(':')
+            if len(parts) > 1 and ":" in parts[1]:
+                m, e = parts[1].split(":")
                 event_type = int(e) if e else 1
-            
-            flags = 0
-            if event_type == 1: flags |= 0x01
-            if event_type == 3: flags |= 0x02
-            if event_type == 2: flags |= 0x04
-            return {'type': 'key', 'flags': flags, 'code': codepoint}
 
-        if seq.startswith('\x1b[<') and seq[-1] in 'Mm':
+            flags = 0
+            if event_type == 1:
+                flags |= 0x01
+            if event_type == 3:
+                flags |= 0x02
+            if event_type == 2:
+                flags |= 0x04
+            return {"type": "key", "flags": flags, "code": codepoint}
+
+        if seq.startswith("\x1b[<") and seq[-1] in "Mm":
             inner = seq[3:-1]
-            parts = inner.split(';')
+            parts = inner.split(";")
             if len(parts) == 3:
                 cb, cx, cy = (int(x) for x in parts)
-                pressed = seq[-1] == 'M'
-                buttons = (cb & 0x03) + 1 if pressed else 0 # 1-based button for ydotool click
-                return {'type': 'mouse', 'buttons': buttons, 'x': cx - 1, 'y': cy - 1}
+                pressed = seq[-1] == "M"
+                buttons = (
+                    (cb & 0x03) + 1 if pressed else 0
+                )  # 1-based button for ydotool click
+                return {"type": "mouse", "buttons": buttons, "x": cx - 1, "y": cy - 1}
         return None
+
 
 class InputHandler:
     def __init__(self, ssh_stdin):
@@ -231,60 +259,84 @@ class InputHandler:
             while not self._stop.is_set():
                 r, _, _ = select.select([sys.stdin], [], [], 0.05)
                 if r:
-                    data = sys.stdin.buffer.read(1024)
-                    if not data: break
+                    # Use os.read to avoid any internal buffering in Python
+                    data = os.read(fd, 4096)
+                    if not data:
+                        break
                     for ev in parser.parse(data):
                         self._send(ev)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
     def _send(self, ev):
-        if ev['type'] == 'key':
-            pkt = struct.pack(INPUT_FMT, INPUT_KEY, ev['flags'], ev['code'], 0, 0)
+        if ev["type"] == "key":
+            pkt = struct.pack(INPUT_FMT, INPUT_KEY, ev["flags"], ev["code"], 0, 0)
+            sys.stderr.write(
+                f"CLIENT_DEBUG: sending key code={ev['code']} flags={ev['flags']}\n"
+            )
         else:
-            pkt = struct.pack(INPUT_FMT, INPUT_MOUSE, ev['buttons'], 0, ev['x'], ev['y'])
+            pkt = struct.pack(
+                INPUT_FMT, INPUT_MOUSE, ev["buttons"], 0, ev["x"], ev["y"]
+            )
+            # sys.stderr.write(f"CLIENT_DEBUG: sending mouse x={ev['x']} y={ev['y']} buttons={ev['buttons']}\n")
+
+        sys.stderr.flush()
         self.sink.write(pkt)
         self.sink.flush()
 
+
 def query_terminal_cell_size():
-    sys.stdout.buffer.write(b'\033[14t')
+    sys.stdout.buffer.write(b"\033[14t")
     sys.stdout.buffer.flush()
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     tty.setraw(fd)
-    resp = b''
+    resp = b""
     try:
         while True:
             r, _, _ = select.select([sys.stdin], [], [], 0.5)
-            if not r: break
+            if not r:
+                break
             ch = sys.stdin.buffer.read(1)
             resp += ch
-            if ch == b't': break
+            if ch == b"t":
+                break
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
-    m = re.search(rb'\[4;(\d+);(\d+)t', resp)
+    m = re.search(rb"\[4;(\d+);(\d+)t", resp)
     th, tw = (int(m.group(1)), int(m.group(2))) if m else (1080, 1920)
     cols, rows = shutil.get_terminal_size()
     return tw // cols, th // rows, cols, rows
 
+
 def main(args):
-    sys.stderr.write(f"DEBUG: Kitten started with args: {args}\n")
-    sys.stderr.flush()
     if len(args) < 2:
-        print("Usage: kitty +kitten kgp-client.py user@host [--scale WxH]")
+        print("Usage: kitty +kitten kgp-client.py user@host [server_options]")
+        print("Example: kitty +kitten kgp-client.py user@host -d -s 1280x720")
         return
 
     remote_host = args[1]
-    
-    # Use a shell wrapper to ensure PATH is set and WAYLAND_DISPLAY is present.
-    remote_cmd = 'export PATH=$HOME/.local/bin:/usr/local/bin:$PATH; export WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}; kgp'
-    
+    server_args = " ".join(args[2:])
+
+    # Search for the binary in common locations: current dir, or PATH
+    remote_cmd = (
+        f"export PATH=$HOME/.local/bin:/usr/local/bin:$PATH; "
+        f"export WAYLAND_DISPLAY=${{WAYLAND_DISPLAY:-wayland-1}}; "
+        f'if [ -f "./kgp-test-bin" ]; then CMD="./kgp-test-bin"; '
+        f'elif [ -f "./Coding/hypremote/kgp-test/kgp-test-bin" ]; then CMD="./Coding/hypremote/kgp-test/kgp-test-bin"; '
+        f'else CMD="kgp-test-bin"; fi; '
+        f"exec $CMD {server_args}"
+    )
+
+    sys.stderr.write(f"DEBUG: Executing remote command: {remote_cmd}\n")
+    sys.stderr.flush()
+
     ssh = subprocess.Popen(
-        ['ssh', '-q', '-T', remote_host, remote_cmd],
+        ["ssh", "-q", "-T", remote_host, remote_cmd],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=sys.stderr,  # IMPORTANT: forward stderr to see errors
-        bufsize=0
+        bufsize=0,
     )
 
     sys.stdout.buffer.write(SETUP)
@@ -292,7 +344,7 @@ def main(args):
     cell_w, cell_h, cols, rows = query_terminal_cell_size()
     renderer = KittyRenderer(rows, cols, cell_w, cell_h)
     input_handler = InputHandler(ssh.stdin)
-    
+
     try:
         input_handler.start()
         while True:
@@ -302,6 +354,7 @@ def main(args):
         print("\n[kgp] Connection closed by remote host.", file=sys.stderr)
     except Exception as e:
         import traceback
+
         traceback.print_exc(file=sys.stderr)
         # Give user time to see the error before kitten closes
         input("\nPress Enter to exit...")
@@ -312,5 +365,6 @@ def main(args):
         sys.stdout.buffer.flush()
         ssh.terminate()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main(sys.argv)

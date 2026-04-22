@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <arpa/inet.h>
@@ -22,6 +23,7 @@ struct input_packet {
 static pthread_t input_thread;
 static volatile int input_running = 0;
 static uint32_t screen_w, screen_h;
+static int input_verbose = 0;
 
 static void *input_loop(void *arg) {
     (void)arg;
@@ -37,7 +39,7 @@ static void *input_loop(void *arg) {
             const char *state = (pkt.flags & 0x01) ? "down" : "up";
             snprintf(cmd, sizeof(cmd), "ydotool key %u:%s", code, state);
             system(cmd); 
-            fprintf(stderr, "[debug] input key: %u %s\n", code, state);
+            if (input_verbose) fprintf(stderr, "[debug] input key: %u %s\n", code, state);
         } else if (pkt.type == INPUT_MOUSE) {
             int16_t mx = ntohs(pkt.mx);
             int16_t my = ntohs(pkt.my);
@@ -54,9 +56,10 @@ static void *input_loop(void *arg) {
     return NULL;
 }
 
-int input_start(uint32_t sw, uint32_t sh) {
+int input_start(uint32_t sw, uint32_t sh, bool verbose) {
     screen_w = sw;
     screen_h = sh;
+    input_verbose = verbose;
     input_running = 1;
     if (pthread_create(&input_thread, NULL, input_loop, NULL) != 0) {
         return -1;

@@ -19,6 +19,7 @@ struct kitty_renderer {
     size_t   encode_buf_size;
     char    *protocol_buf;       // Batch I/O buffer
     size_t   protocol_buf_size;
+    bool     verbose;
 };
 
 static double get_time_ms() {
@@ -35,10 +36,11 @@ static void update_term_size(struct kitty_renderer *r) {
     }
 }
 
-struct kitty_renderer *kitty_renderer_create(int rows, int cols) {
+struct kitty_renderer *kitty_renderer_create(int rows, int cols, bool verbose) {
     struct kitty_renderer *r = calloc(1, sizeof(struct kitty_renderer));
     if (!r) return NULL;
 
+    r->verbose = verbose;
     srand(time(NULL));
     r->kitty_id = rand() % 10000 + 1;
     r->screen_rows = rows;
@@ -143,7 +145,7 @@ void kitty_render_frame(struct kitty_renderer *r, const uint8_t *rgb, uint32_t w
     fflush(stdout);
     double t_end = get_time_ms();
 
-    if (r->frame_number % 30 == 0) {
+    if (r->verbose && r->frame_number % 30 == 0) {
         fprintf(stderr, "Renderer info: fwrite: %.2f ms, total_size: %.2f KB\n", 
                 t_end - t_start, (double)p_off / 1024.0);
     }

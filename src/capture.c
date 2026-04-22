@@ -133,7 +133,7 @@ int capture_frame(struct capture_ctx *ctx, uint8_t **rgb_out, uint32_t *width, u
     }
     
     if (ctx->failed || !ctx->buffer_info_received) {
-        fprintf(stderr, "[debug] failed to get buffer info\n");
+        if (ctx->verbose) fprintf(stderr, "[debug] failed to get buffer info\n");
         zwlr_screencopy_frame_v1_destroy(frame);
         return -1;
     }
@@ -146,7 +146,7 @@ int capture_frame(struct capture_ctx *ctx, uint8_t **rgb_out, uint32_t *width, u
             close(ctx->fd);
         }
         if (create_shm_buffer(ctx) < 0) {
-            fprintf(stderr, "[debug] failed to create shm buffer\n");
+            if (ctx->verbose) fprintf(stderr, "[debug] failed to create shm buffer\n");
             zwlr_screencopy_frame_v1_destroy(frame);
             return -1;
         }
@@ -165,7 +165,7 @@ int capture_frame(struct capture_ctx *ctx, uint8_t **rgb_out, uint32_t *width, u
     }
 
     if (ctx->failed || !ctx->ready) {
-        fprintf(stderr, "[debug] failed to copy frame\n");
+        if (ctx->verbose) fprintf(stderr, "[debug] failed to copy frame\n");
         wl_buffer_destroy(buffer);
         zwlr_screencopy_frame_v1_destroy(frame);
         return -1;
@@ -200,7 +200,7 @@ int capture_frame(struct capture_ctx *ctx, uint8_t **rgb_out, uint32_t *width, u
     }
 
     static int frame_count = 0;
-    if (++frame_count % 30 == 0) {
+    if (ctx->verbose && ++frame_count % 30 == 0) {
         fprintf(stderr, "Capture info: Copy: %.2f ms, Conv: %.2f ms, Total wait: %.2f ms\n", 
                 t_copy_done - t_start, t_conv_done - t_copy_done, t_conv_done - t_start);
     }

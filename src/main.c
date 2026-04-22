@@ -24,21 +24,24 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "Usage: %s [options]\n", prog);
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -s, --scale WxH   Downscale to target resolution (e.g., 1280x720)\n");
+    fprintf(stderr, "  -d, --debug       Show debug messages\n");
     fprintf(stderr, "  -h, --help        Show this help\n");
 }
 
 int main(int argc, char *argv[]) {
     uint32_t target_w = 0, target_h = 0;
     bool scale_enabled = false;
+    bool verbose = false;
 
     static struct option long_options[] = {
         {"scale", required_argument, 0, 's'},
+        {"debug", no_argument,       0, 'd'},
         {"help",  no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "s:h", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "s:dh", long_options, NULL)) != -1) {
         switch (opt) {
             case 's':
                 if (sscanf(optarg, "%ux%u", &target_w, &target_h) != 2) {
@@ -46,6 +49,9 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
                 scale_enabled = true;
+                break;
+            case 'd':
+                verbose = true;
                 break;
             case 'h':
                 print_usage(argv[0]);
@@ -60,12 +66,13 @@ int main(int argc, char *argv[]) {
     signal(SIGPIPE, SIG_IGN); // Handle SSH disconnect gracefully
 
     struct capture_ctx ctx;
+    ctx.verbose = verbose;
     if (capture_init(&ctx) < 0) {
         fprintf(stderr, "Failed to initialize capture\n");
         return 1;
     }
 
-    input_start(ctx.width, ctx.height);
+    input_start(ctx.width, ctx.height, verbose);
 
     uint8_t *scaled_buf = NULL;
     uint8_t *dirty_buf = NULL;

@@ -34,6 +34,8 @@ struct capture_ctx {
     // Previous RGB buffer for diffing
     uint8_t *prev_rgb;
     size_t prev_rgb_size;
+
+    bool verbose;
 };
 
 int capture_init(struct capture_ctx *ctx);

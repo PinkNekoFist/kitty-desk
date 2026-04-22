@@ -1,3 +1,4 @@
+#define _DEFAULT_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +20,12 @@ struct kitty_renderer {
     char    *protocol_buf;       // Batch I/O buffer
     size_t   protocol_buf_size;
 };
+
+static double get_time_ms() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0;
+}
 
 static void update_term_size(struct kitty_renderer *r) {
     struct winsize ws;
@@ -131,8 +138,15 @@ void kitty_render_frame(struct kitty_renderer *r, const uint8_t *rgb, uint32_t w
         p_off += anim_len;
     }
 
+    double t_start = get_time_ms();
     fwrite(r->protocol_buf, 1, p_off, stdout);
     fflush(stdout);
+    double t_end = get_time_ms();
+
+    if (r->frame_number % 30 == 0) {
+        fprintf(stderr, "Renderer info: fwrite: %.2f ms, total_size: %.2f KB\n", 
+                t_end - t_start, (double)p_off / 1024.0);
+    }
 
     r->frame_number++;
 }

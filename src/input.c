@@ -199,11 +199,22 @@ static void inject_key(int keycode, int value) {
 
 static int g_verbose = 0;
 
+#include <signal.h>
+
 static void handle_key_event(const struct key_event *ev) {
     if (g_verbose) {
         fprintf(stderr, "[input] cp=%u mod=%u type=%d\n",
                 ev->codepoint, ev->modifiers, ev->event_type);
         fflush(stderr);
+    }
+
+    // 偵測 Ctrl + Alt + Q (Codepoint 113)
+    // MOD_CTRL | MOD_ALT = 0x04 | 0x02 = 0x06
+    if ((ev->modifiers & (MOD_CTRL | MOD_ALT)) == (MOD_CTRL | MOD_ALT) && 
+        (ev->codepoint == 'q' || ev->codepoint == 'Q')) {
+        fprintf(stderr, "\n[input] Ctrl+Alt+Q detected, exiting...\n");
+        kill(getpid(), SIGINT);
+        return;
     }
 
     // 忽略 repeat，避免重複注入
@@ -269,9 +280,25 @@ int input_start(uint32_t screen_w, uint32_t screen_h, bool verbose) {
 void input_stop(void) {
     if (input_running) {
         input_running = 0;
-        // The thread will exit on the next read() failure or we could cancel it, 
-        // but since it's STDIN it's better to just let it be or close stdin if possible.
-        // For simplicity, we just join.
+        
+        // 強制釋放所有可能的修飾鍵，避免退出後遠端卡死
+        // 這些是 Linux Input Keycodes
+        int modifiers[] = {
+            29,  // KEY_LEFTCTRL
+            97,  // KEY_RIGHTCTRL
+            42,  // KEY_LEFTSHIFT
+            54,  // KEY_RIGHTSHIFT
+            56,  // KEY_LEFTALT
+            100, // KEY_RIGHTALT
+            125, // KEY_LEFTMETA (Super)
+            126  // KEY_RIGHTMETA (Super)
+        };
+        
+        if (g_verbose) fprintf(stderr, "[input] Releasing all modifiers...\n");
+        for (int i = 0; i < 8; i++) {
+            inject_key(modifiers[i], 0); // 0 = Release
+        }
+        
         pthread_join(input_tid, NULL);
     }
 }

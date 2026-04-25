@@ -43,20 +43,20 @@ INPUT_MOUSE = 2
 
 SETUP = (
     b"\033[?1049h"  # Alternate screen
-    b"\033[2J"  # Clear screen
-    b"\033[H"  # Cursor to home
-    b"\033[?25l"  # Hide cursor
+    b"\033[2J"      # Clear screen
+    b"\033[H"       # Cursor to home
+    b"\033[?25l"    # Hide cursor
     b"\033[?1003h"  # Any motion mouse tracking
     b"\033[?1006h"  # SGR 1006 mouse encoding
-    b"\033[>11u"  # Kitty Keyboard Protocol
+    b"\033[>11u"    # Kitty Keyboard Protocol (flags: 1+2+8)
 )
 
 TEARDOWN = (
-    b"\033[<u"  # Restore keyboard protocol
-    b"\033[?1003l"  # Stop mouse tracking
+    b"\033[<u"      # Restore keyboard protocol
+    b"\033[?1003l"
     b"\033[?1006l"
-    b"\033[?25h"  # Show cursor
-    b"\033[?1049l"  # Back to main screen
+    b"\033[?25h"
+    b"\033[?1049l"
 )
 
 
@@ -171,72 +171,6 @@ class KittyRenderer:
         self.out.flush()
 
 
-class KittyInputParser:
-    def parse(self, data: bytes) -> list:
-        events = []
-        i = 0
-        while i < len(data):
-            if data[i] == 0x1B and i + 1 < len(data) and data[i + 1] == ord("["):
-                # CSI sequence
-                end = i + 2
-                while (
-                    end < len(data)
-                    and chr(data[end])
-                    not in "ABCDEFGHIJKLMPSTXZabcdefghijklmnopqrstuvwxyz~u"
-                ):
-                    end += 1
-                if end < len(data):
-                    seq = data[i : end + 1].decode("utf-8", errors="replace")
-                    ev = self._parse_csi(seq)
-                    if ev:
-                        events.append(ev)
-                    i = end + 1
-                else:
-                    i += 1
-            else:
-                # Raw ASCII character
-                ch = data[i]
-                events.append(
-                    {"type": "key", "flags": 0x01, "code": ch}
-                )  # Assume Press
-                events.append(
-                    {"type": "key", "flags": 0x00, "code": ch}
-                )  # Immediate Release for raw ASCII
-                i += 1
-        return events
-
-    def _parse_csi(self, seq):
-        if seq.endswith("u"):
-            inner = seq[2:-1]
-            parts = inner.split(";")
-            codepoint = int(parts[0]) if parts[0] else 0
-            event_type = 1
-            if len(parts) > 1 and ":" in parts[1]:
-                m, e = parts[1].split(":")
-                event_type = int(e) if e else 1
-
-            flags = 0
-            if event_type == 1:
-                flags |= 0x01
-            if event_type == 3:
-                flags |= 0x02
-            if event_type == 2:
-                flags |= 0x04
-            return {"type": "key", "flags": flags, "code": codepoint}
-
-        if seq.startswith("\x1b[<") and seq[-1] in "Mm":
-            inner = seq[3:-1]
-            parts = inner.split(";")
-            if len(parts) == 3:
-                cb, cx, cy = (int(x) for x in parts)
-                pressed = seq[-1] == "M"
-                buttons = (
-                    (cb & 0x03) + 1 if pressed else 0
-                )  # 1-based button for ydotool click
-                return {"type": "mouse", "buttons": buttons, "x": cx - 1, "y": cy - 1}
-        return None
-
-
 class InputHandler:
     def __init__(self, ssh_stdin):
         self.sink = ssh_stdin
@@ -252,37 +186,22 @@ class InputHandler:
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         new = termios.tcgetattr(fd)
+        # Disable line buffering, echo, and signal generation (ISIG)
+        # Disabling ISIG allows us to capture Ctrl+C and forward it.
         new[3] &= ~(termios.ISIG | termios.ICANON | termios.ECHO)
         termios.tcsetattr(fd, termios.TCSADRAIN, new)
-        parser = KittyInputParser()
         try:
             while not self._stop.is_set():
                 r, _, _ = select.select([sys.stdin], [], [], 0.05)
                 if r:
-                    # Use os.read to avoid any internal buffering in Python
                     data = os.read(fd, 4096)
                     if not data:
                         break
-                    for ev in parser.parse(data):
-                        self._send(ev)
+                    # Forward raw escape sequences directly to server
+                    self.sink.write(data)
+                    self.sink.flush()
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
-    def _send(self, ev):
-        if ev["type"] == "key":
-            pkt = struct.pack(INPUT_FMT, INPUT_KEY, ev["flags"], ev["code"], 0, 0)
-            sys.stderr.write(
-                f"CLIENT_DEBUG: sending key code={ev['code']} flags={ev['flags']}\n"
-            )
-        else:
-            pkt = struct.pack(
-                INPUT_FMT, INPUT_MOUSE, ev["buttons"], 0, ev["x"], ev["y"]
-            )
-            # sys.stderr.write(f"CLIENT_DEBUG: sending mouse x={ev['x']} y={ev['y']} buttons={ev['buttons']}\n")
-
-        sys.stderr.flush()
-        self.sink.write(pkt)
-        self.sink.flush()
 
 
 def query_terminal_cell_size():

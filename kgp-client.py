@@ -142,12 +142,10 @@ class KittyRenderer:
                         f"s={frame.w},v={frame.h},m={more};"
                     )
                 else:
-                    # Update dirty rect
-                    cx = frame.x // self.cell_w
-                    cy = frame.y // self.cell_h
+                    # Update dirty rect - use pixel coordinates (x, y), not cell coordinates
                     hdr = (
                         f"\033_Ga=f,r=1,i={self.kitty_id},f=24,q=2,"
-                        f"x={cx},y={cy},"
+                        f"x={frame.x},y={frame.y},"
                         f"s={frame.w},v={frame.h},m={more};"
                     )
                 first_chunk = False

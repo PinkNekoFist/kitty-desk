@@ -1,0 +1,5 @@
+*.o
+kgp-remote
+kgp-test-bin
+proto/wlr-screencopy-unstable-v1-client-protocol.c
+proto/wlr-screencopy-unstable-v1-client-protocol.h

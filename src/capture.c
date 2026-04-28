@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "capture.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,16 +7,6 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <time.h>
-#include "capture.h"
-
-static double get_time_ms() {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0;
-}
-
-// --- Registry ---
 
 static void handle_global(void *data, struct wl_registry *registry,
                           uint32_t name, const char *interface, uint32_t version) {
@@ -38,8 +29,6 @@ static const struct wl_registry_listener registry_listener = {
     .global_remove = handle_global_remove,
 };
 
-// --- Screencopy ---
-
 static void handle_buffer(void *data, struct zwlr_screencopy_frame_v1 *frame,
                          uint32_t format, uint32_t width, uint32_t height, uint32_t stride) {
     struct capture_ctx *ctx = data;
@@ -55,7 +44,7 @@ static void handle_flags(void *data, struct zwlr_screencopy_frame_v1 *frame, uin
 static void handle_ready(void *data, struct zwlr_screencopy_frame_v1 *frame,
                         uint32_t tv_sec_hi, uint32_t tv_sec_lo, uint32_t tv_nsec) {
     struct capture_ctx *ctx = data;
-    ctx->ready = true;
+    ctx->frame_ready = true;
 }
 
 static void handle_failed(void *data, struct zwlr_screencopy_frame_v1 *frame) {
@@ -69,8 +58,6 @@ static const struct zwlr_screencopy_frame_v1_listener frame_listener = {
     .ready = handle_ready,
     .failed = handle_failed,
 };
-
-// --- SHM ---
 
 static int create_shm_buffer(struct capture_ctx *ctx) {
     size_t size = ctx->stride * ctx->height;
@@ -86,129 +73,81 @@ static int create_shm_buffer(struct capture_ctx *ctx) {
         return -1;
     }
     ctx->fd = fd;
-    ctx->data = data;
-    ctx->data_size = size;
+    ctx->shm_data = data;
+    ctx->shm_size = size;
     return 0;
 }
 
-// --- API ---
-
 int capture_init(struct capture_ctx *ctx) {
-    memset(ctx, 0, sizeof(*ctx));
     ctx->display = wl_display_connect(NULL);
     if (!ctx->display) return -1;
-
     ctx->registry = wl_display_get_registry(ctx->display);
     wl_registry_add_listener(ctx->registry, &registry_listener, ctx);
     wl_display_roundtrip(ctx->display);
-
     if (!ctx->shm || !ctx->output || !ctx->screencopy_manager) return -1;
     return 0;
 }
 
-void capture_cleanup(struct capture_ctx *ctx) {
-    if (ctx->data) munmap(ctx->data, ctx->data_size);
+void capture_destroy(struct capture_ctx *ctx) {
+    if (ctx->shm_data) munmap(ctx->shm_data, ctx->shm_size);
     if (ctx->fd >= 0) close(ctx->fd);
     if (ctx->screencopy_manager) zwlr_screencopy_manager_v1_destroy(ctx->screencopy_manager);
     if (ctx->shm) wl_shm_destroy(ctx->shm);
     if (ctx->output) wl_output_destroy(ctx->output);
     if (ctx->registry) wl_registry_destroy(ctx->registry);
     if (ctx->display) wl_display_disconnect(ctx->display);
-    if (ctx->rgb_buf) free(ctx->rgb_buf);
-    if (ctx->prev_rgb) free(ctx->prev_rgb);
+    if (ctx->rgb_curr) free(ctx->rgb_curr);
+    if (ctx->rgb_prev) free(ctx->rgb_prev);
 }
 
-int capture_frame(struct capture_ctx *ctx, uint8_t **rgb_out, uint32_t *width, uint32_t *height) {
-    double t_start = get_time_ms();
+int capture_frame(struct capture_ctx *ctx) {
     struct zwlr_screencopy_frame_v1 *frame = zwlr_screencopy_manager_v1_capture_output(ctx->screencopy_manager, 0, ctx->output);
     zwlr_screencopy_frame_v1_add_listener(frame, &frame_listener, ctx);
-
-    ctx->ready = false;
+    ctx->frame_ready = false;
     ctx->failed = false;
     ctx->buffer_info_received = false;
-
-    // First roundtrip to get buffer info
     while (!ctx->buffer_info_received && !ctx->failed) {
         if (wl_display_dispatch(ctx->display) == -1) break;
     }
-    
     if (ctx->failed || !ctx->buffer_info_received) {
-        if (ctx->verbose) fprintf(stderr, "[debug] failed to get buffer info\n");
         zwlr_screencopy_frame_v1_destroy(frame);
         return -1;
     }
-
-    // Allocate SHM buffer only if needed or size changed
-    size_t required_size = ctx->stride * ctx->height;
-    if (!ctx->data || ctx->data_size < required_size) {
-        if (ctx->data) {
-            munmap(ctx->data, ctx->data_size);
+    size_t required_shm = ctx->stride * ctx->height;
+    if (!ctx->shm_data || ctx->shm_size < required_shm) {
+        if (ctx->shm_data) {
+            munmap(ctx->shm_data, ctx->shm_size);
             close(ctx->fd);
         }
         if (create_shm_buffer(ctx) < 0) {
-            if (ctx->verbose) fprintf(stderr, "[debug] failed to create shm buffer\n");
             zwlr_screencopy_frame_v1_destroy(frame);
             return -1;
         }
     }
-
-    struct wl_shm_pool *pool = wl_shm_create_pool(ctx->shm, ctx->fd, ctx->data_size);
+    struct wl_shm_pool *pool = wl_shm_create_pool(ctx->shm, ctx->fd, ctx->shm_size);
     struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, ctx->width, ctx->height, ctx->stride, ctx->format);
     wl_shm_pool_destroy(pool);
-
-    // Second request to copy
     zwlr_screencopy_frame_v1_copy(frame, buffer);
-
-    // Wait for ready
-    while (!ctx->ready && !ctx->failed) {
+    while (!ctx->frame_ready && !ctx->failed) {
         if (wl_display_dispatch(ctx->display) == -1) break;
     }
-
-    if (ctx->failed || !ctx->ready) {
-        if (ctx->verbose) fprintf(stderr, "[debug] failed to copy frame\n");
+    if (ctx->failed || !ctx->frame_ready) {
         wl_buffer_destroy(buffer);
         zwlr_screencopy_frame_v1_destroy(frame);
         return -1;
     }
-
-    double t_copy_done = get_time_ms();
-
-    // Convert XRGB8888 to RGB24
     size_t rgb_size = ctx->width * ctx->height * 3;
-    if (!ctx->rgb_buf || ctx->rgb_buf_size < rgb_size) {
-        ctx->rgb_buf = realloc(ctx->rgb_buf, rgb_size);
-        ctx->rgb_buf_size = rgb_size;
+    if (!ctx->rgb_curr || ctx->rgb_size < rgb_size) {
+        ctx->rgb_curr = realloc(ctx->rgb_curr, rgb_size);
+        ctx->rgb_prev = realloc(ctx->rgb_prev, rgb_size);
+        ctx->rgb_size = rgb_size;
+        memset(ctx->rgb_prev, 0, rgb_size);
     }
-
-    for (uint32_t y = 0; y < ctx->height; y++) {
-        for (uint32_t x = 0; x < ctx->width; x++) {
-            uint8_t *src = ctx->data + y * ctx->stride + x * 4;
-            uint8_t *dst = ctx->rgb_buf + (y * ctx->width + x) * 3;
-            dst[0] = src[2]; // R
-            dst[1] = src[1]; // G
-            dst[2] = src[0]; // B
-        }
+    for (uint32_t i = 0; i < ctx->width * ctx->height; i++) {
+        uint8_t *src = ctx->shm_data + i * 4;
+        uint8_t *dst = ctx->rgb_curr + i * 3;
+        dst[0] = src[2]; dst[1] = src[1]; dst[2] = src[0];
     }
-
-    double t_conv_done = get_time_ms();
-
-    // Ensure prev_rgb is allocated
-    if (!ctx->prev_rgb || ctx->prev_rgb_size < rgb_size) {
-        ctx->prev_rgb = realloc(ctx->prev_rgb, rgb_size);
-        ctx->prev_rgb_size = rgb_size;
-        memset(ctx->prev_rgb, 0, rgb_size);
-    }
-
-    static int frame_count = 0;
-    if (ctx->verbose && ++frame_count % 30 == 0) {
-        fprintf(stderr, "Capture info: Copy: %.2f ms, Conv: %.2f ms, Total wait: %.2f ms\n", 
-                t_copy_done - t_start, t_conv_done - t_copy_done, t_conv_done - t_start);
-    }
-
-    *rgb_out = ctx->rgb_buf;
-    *width = ctx->width;
-    *height = ctx->height;
-
     wl_buffer_destroy(buffer);
     zwlr_screencopy_frame_v1_destroy(frame);
     return 0;

@@ -2,15 +2,26 @@
 #define KITTY_H
 
 #include <stdint.h>
-#include <stdbool.h>
 #include <stddef.h>
-
 #include "diff.h"
 
-struct kitty_renderer;
+struct kitty_ctx {
+    long     kitty_id;
+    int      frame_number;
+    int      screen_rows;
+    int      screen_cols;
+    int      cell_w_px;
+    int      cell_h_px;
+    char    *proto_buf;
+    size_t   proto_cap;
+    size_t   proto_len;
+};
 
-struct kitty_renderer *kitty_renderer_create(int rows, int cols, bool verbose);
-void kitty_renderer_destroy(struct kitty_renderer *r);
-void kitty_render_frame(struct kitty_renderer *r, const uint8_t *rgb, uint32_t width, uint32_t height, struct dirty_rect rect);
+void kitty_init(struct kitty_ctx *ctx);
+void kitty_render(struct kitty_ctx *ctx,
+                  const uint8_t *png_data, size_t png_size,
+                  const struct dirty_rect *rect,
+                  uint32_t full_w, uint32_t full_h);
+void kitty_destroy(struct kitty_ctx *ctx);
 
 #endif

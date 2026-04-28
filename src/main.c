@@ -120,6 +120,9 @@ int main(int argc, char *argv[]) {
   kitty_init(&kitty);
   input_start(cap.width, cap.height, verbose);
 
+  struct palette pal;
+  quantize_init_static_palette(&pal);
+
   uint8_t *scale_buf = NULL;
   uint8_t *dirty_rgb = NULL;
   uint8_t *indexed = NULL;
@@ -178,7 +181,6 @@ int main(int argc, char *argv[]) {
     }
 
     extract_dirty_rect(frame, fw, rect, dirty_rgb);
-    struct palette pal;
     quantize_rgb(dirty_rgb, rect.w, rect.h, indexed, &pal);
     double t4 = get_time_ms();
     t_total_quant += (t4 - t3);

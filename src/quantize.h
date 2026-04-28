@@ -10,6 +10,8 @@ struct palette {
     uint32_t count;   // Actual colors used (<= 256)
 };
 
+void quantize_init_static_palette(struct palette *palette_out);
+
 void quantize_rgb(const uint8_t *src,
                   uint32_t w, uint32_t h,
                   uint8_t *indexed_out,

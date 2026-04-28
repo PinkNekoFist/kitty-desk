@@ -16,44 +16,60 @@
 #include <unistd.h>
 
 static volatile bool running = true;
-static void on_sigint(int sig) {
-  (void)sig;
-  running = false;
+static struct termios orig_termios;
+static bool termios_saved = false;
+
+static void restore_pty(void) {
+    if (termios_saved) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
+    }
 }
+
+// Global ctx for cleanup
+static struct capture_ctx *g_cap = NULL;
+static struct kitty_ctx *g_kitty = NULL;
+
+static void final_cleanup(void) {
+    input_stop();
+    if (g_kitty) kitty_destroy(g_kitty);
+    if (g_cap) capture_destroy(g_cap);
+    restore_pty();
+    fprintf(stderr, "\r\n[debug] Cleanup done.\r\n");
+    fflush(stderr);
+}
+
+static void on_sigint(int sig) { (void)sig; running = false; }
 
 static void on_sigsegv(int sig) {
     (void)sig;
-    fprintf(stderr, "\r\n[CRASH] Segmentation fault detected!\r\n");
-    fflush(stderr);
+    fprintf(stderr, "\r\n[CRASH] Segmentation fault!\r\n");
+    final_cleanup();
     exit(1);
 }
 
 static void setup_pty(void) {
     struct termios t;
-
-    // stdout：關掉 output processing
-    if (tcgetattr(STDOUT_FILENO, &t) == 0) {
+    if (tcgetattr(STDIN_FILENO, &orig_termios) == 0) {
+        termios_saved = true;
+        t = orig_termios;
+        // Raw mode settings
+        t.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
         t.c_oflag &= ~OPOST;
-        tcsetattr(STDOUT_FILENO, TCSANOW, &t);
-    }
-
-    // stdin：關掉 signal、echo、line buffering
-    if (tcgetattr(STDIN_FILENO, &t) == 0) {
-        t.c_lflag &= ~ISIG;    // Ctrl+C 不產生 SIGINT
-        t.c_lflag &= ~ECHO;    // 關掉回顯
-        t.c_lflag &= ~ICANON;  // 關掉 line buffering（每個 byte 立刻送出）
-        t.c_cc[VMIN]  = 1;     // 至少讀 1 byte
-        t.c_cc[VTIME] = 0;     // 不等待 timeout
+        t.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+        t.c_cflag &= ~(CSIZE | PARENB);
+        t.c_cflag |= CS8;
+        t.c_cc[VMIN] = 1;
+        t.c_cc[VTIME] = 0;
         tcsetattr(STDIN_FILENO, TCSANOW, &t);
     }
 }
 
 int main(int argc, char *argv[]) {
-  // Catch crashes immediately
+  // 1. Setup PTY first to stop echo
+  setup_pty();
   signal(SIGSEGV, on_sigsegv);
-  
-  fprintf(stderr, "[debug] Process started (PID: %d)\r\n", getpid());
-  fflush(stderr);
+  signal(SIGINT, on_sigint);
+  signal(SIGPIPE, SIG_IGN);
 
   uint32_t target_w = 0, target_h = 0;
   bool scale_enabled = false, verbose = false;
@@ -69,30 +85,19 @@ int main(int argc, char *argv[]) {
       verbose = true;
   }
 
-  fprintf(stderr, "[debug] Initializing Wayland...\r\n"); fflush(stderr);
   struct capture_ctx cap = {0}; cap.verbose = verbose;
+  g_cap = &cap;
   if (capture_init(&cap) < 0) {
-      fprintf(stderr, "[critical] Capture initialization failed. Exiting.\r\n"); fflush(stderr);
+      fprintf(stderr, "[critical] Capture initialization failed. Exiting.\r\n");
+      restore_pty();
       return 1;
   }
 
-  fprintf(stderr, "[debug] Screen size: %ux%u\r\n", cap.width, cap.height); fflush(stderr);
-
-  // PTY setup after Wayland check
-  setup_pty();
-
   struct kitty_ctx kitty = {0};
-  fprintf(stderr, "[debug] Initializing Kitty...\r\n"); fflush(stderr);
+  g_kitty = &kitty;
   kitty_init(&kitty);
-  
-  fprintf(stderr, "[debug] Starting input thread...\r\n"); fflush(stderr);
-  if (input_start(cap.width, cap.height, verbose) != 0) {
-      fprintf(stderr, "[error] Failed to start input thread\r\n"); fflush(stderr);
-  }
-  
-  signal(SIGINT, on_sigint);
-  signal(SIGPIPE, SIG_IGN);
-  
+  input_start(cap.width, cap.height, verbose);
+
   uint8_t *scale_buf = NULL;
   uint8_t *dirty_rgb = NULL;
   uint8_t *indexed = NULL;
@@ -102,14 +107,8 @@ int main(int argc, char *argv[]) {
   bool first = true;
   uint32_t seq = 0;
   while (running) {
-    if (verbose) {
-        fprintf(stderr, "[debug] --- Frame %u starts ---\r\n", seq); fflush(stderr);
-    }
-
-    if (capture_frame(&cap) < 0) {
-        fprintf(stderr, "[debug] Capture frame failed\r\n"); fflush(stderr);
-        break;
-    }
+    if (capture_frame(&cap) < 0)
+      break;
 
     uint8_t *frame = cap.rgb_curr;
     uint32_t fw = cap.width, fh = cap.height;
@@ -146,9 +145,7 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    if (rect.w == 0 || rect.h == 0) {
-      continue;
-    }
+    if (rect.w == 0 || rect.h == 0) continue;
 
     extract_dirty_rect(frame, fw, rect, dirty_rgb);
     struct palette pal;
@@ -159,14 +156,13 @@ int main(int argc, char *argv[]) {
     if (png_size > 0) {
       kitty_render(&kitty, png_buf, png_size, &rect, fw, fh);
     }
-    
     seq++;
   }
   
-  fprintf(stderr, "\r\n[debug] Shutting down...\r\n"); fflush(stderr);
-  input_stop();
-  kitty_destroy(&kitty);
-  capture_destroy(&cap);
-  free(scale_buf); free(dirty_rgb); free(indexed); free(png_buf);
+  final_cleanup();
+  free(scale_buf);
+  free(dirty_rgb);
+  free(indexed);
+  free(png_buf);
   return 0;
 }

@@ -148,7 +148,8 @@ static const int MODIFIER_KEYCODES[] = {
     42, 54,  // L/R SHIFT
     56, 100, // L/R ALT
     125, 126, // L/R SUPER
-    28       // ENTER
+    28,      // ENTER
+    14       // BACKSPACE
 };
 
 static void release_modifiers(void) {

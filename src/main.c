@@ -14,10 +14,22 @@
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
+#include <time.h>
 
 static volatile bool running = true;
 static struct termios orig_termios;
 static bool termios_saved = false;
+
+// Timing stats
+static double t_total_cap = 0, t_total_scale = 0, t_total_diff = 0;
+static double t_total_quant = 0, t_total_png = 0, t_total_render = 0;
+static uint64_t frame_count = 0;
+
+static double get_time_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0;
+}
 
 static void restore_pty(void) {
     if (termios_saved) {
@@ -34,7 +46,19 @@ static void final_cleanup(void) {
     if (g_kitty) kitty_destroy(g_kitty);
     if (g_cap) capture_destroy(g_cap);
     restore_pty();
-    fprintf(stderr, "\r\n[debug] Cleanup done.\r\n");
+    
+    if (frame_count > 0) {
+        fprintf(stderr, "\r\n=== Performance Summary (%lu frames) ===\r\n", frame_count);
+        fprintf(stderr, "Avg Capture: %.2f ms\r\n", t_total_cap / frame_count);
+        fprintf(stderr, "Avg Scale:   %.2f ms\r\n", t_total_scale / frame_count);
+        fprintf(stderr, "Avg Diff:    %.2f ms\r\n", t_total_diff / frame_count);
+        fprintf(stderr, "Avg Quant:   %.2f ms\r\n", t_total_quant / frame_count);
+        fprintf(stderr, "Avg PNG:     %.2f ms\r\n", t_total_png / frame_count);
+        fprintf(stderr, "Avg Render:  %.2f ms\r\n", t_total_render / frame_count);
+        double avg_total = (t_total_cap + t_total_scale + t_total_diff + t_total_quant + t_total_png + t_total_render) / frame_count;
+        fprintf(stderr, "Avg Total:   %.2f ms (%.1f FPS)\r\n", avg_total, 1000.0 / avg_total);
+        fprintf(stderr, "========================================\r\n");
+    }
     fflush(stderr);
 }
 
@@ -52,7 +76,6 @@ static void setup_pty(void) {
     if (tcgetattr(STDIN_FILENO, &orig_termios) == 0) {
         termios_saved = true;
         t = orig_termios;
-        // Raw mode settings
         t.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
         t.c_oflag &= ~OPOST;
         t.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
@@ -65,7 +88,6 @@ static void setup_pty(void) {
 }
 
 int main(int argc, char *argv[]) {
-  // 1. Setup PTY first to stop echo
   setup_pty();
   signal(SIGSEGV, on_sigsegv);
   signal(SIGINT, on_sigint);
@@ -88,7 +110,7 @@ int main(int argc, char *argv[]) {
   struct capture_ctx cap = {0}; cap.verbose = verbose;
   g_cap = &cap;
   if (capture_init(&cap) < 0) {
-      fprintf(stderr, "[critical] Capture initialization failed. Exiting.\r\n");
+      fprintf(stderr, "[critical] Capture initialization failed.\r\n");
       restore_pty();
       return 1;
   }
@@ -105,10 +127,11 @@ int main(int argc, char *argv[]) {
   uint32_t allocated_px = 0;
 
   bool first = true;
-  uint32_t seq = 0;
   while (running) {
-    if (capture_frame(&cap) < 0)
-      break;
+    double t0 = get_time_ms();
+    if (capture_frame(&cap) < 0) break;
+    double t1 = get_time_ms();
+    t_total_cap += (t1 - t0);
 
     uint8_t *frame = cap.rgb_curr;
     uint32_t fw = cap.width, fh = cap.height;
@@ -117,6 +140,8 @@ int main(int argc, char *argv[]) {
       scale_rgb(cap.rgb_curr, cap.width, cap.height, scale_buf, target_w, target_h);
       frame = scale_buf; fw = target_w; fh = target_h;
     }
+    double t2 = get_time_ms();
+    t_total_scale += (t2 - t1);
 
     uint32_t curr_px = fw * fh;
     if (curr_px > allocated_px) {
@@ -144,25 +169,34 @@ int main(int argc, char *argv[]) {
         memcpy(cap.rgb_prev, frame, fw * fh * 3);
       }
     }
+    double t3 = get_time_ms();
+    t_total_diff += (t3 - t2);
 
-    if (rect.w == 0 || rect.h == 0) continue;
+    if (rect.w == 0 || rect.h == 0) {
+        frame_count++;
+        continue;
+    }
 
     extract_dirty_rect(frame, fw, rect, dirty_rgb);
     struct palette pal;
     quantize_rgb(dirty_rgb, rect.w, rect.h, indexed, &pal);
+    double t4 = get_time_ms();
+    t_total_quant += (t4 - t3);
 
     size_t png_size = png_encode_indexed(indexed, &pal, rect.w, rect.h, png_buf, allocated_px * 2);
+    double t5 = get_time_ms();
+    t_total_png += (t5 - t4);
 
     if (png_size > 0) {
       kitty_render(&kitty, png_buf, png_size, &rect, fw, fh);
     }
-    seq++;
+    double t6 = get_time_ms();
+    t_total_render += (t6 - t5);
+
+    frame_count++;
   }
   
   final_cleanup();
-  free(scale_buf);
-  free(dirty_rgb);
-  free(indexed);
-  free(png_buf);
+  free(scale_buf); free(dirty_rgb); free(indexed); free(png_buf);
   return 0;
 }

@@ -20,6 +20,11 @@ static volatile bool running = true;
 static struct termios orig_termios;
 static bool termios_saved = false;
 
+enum encode_mode {
+    MODE_INDEXED,
+    MODE_RGB24
+};
+
 // Timing stats
 static double t_total_cap = 0, t_total_scale = 0, t_total_diff = 0;
 static double t_total_quant = 0, t_total_png = 0, t_total_render = 0;
@@ -95,16 +100,25 @@ int main(int argc, char *argv[]) {
 
   uint32_t target_w = 0, target_h = 0;
   bool scale_enabled = false, verbose = false;
+  enum encode_mode mode = MODE_INDEXED;
   static struct option long_options[] = {{"scale", required_argument, 0, 's'},
                                          {"verbose", no_argument, 0, 'v'},
+                                         {"mode", required_argument, 0, 'm'},
                                          {0, 0, 0, 0}};
   int opt;
-  while ((opt = getopt_long(argc, argv, "s:v", long_options, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "s:vm:", long_options, NULL)) != -1) {
     if (opt == 's') {
       sscanf(optarg, "%ux%u", &target_w, &target_h);
       scale_enabled = true;
-    } else if (opt == 'v')
+    } else if (opt == 'v') {
       verbose = true;
+    } else if (opt == 'm') {
+      if (strcmp(optarg, "rgb24") == 0) {
+        mode = MODE_RGB24;
+      } else {
+        mode = MODE_INDEXED;
+      }
+    }
   }
 
   struct capture_ctx cap = {0}; cap.verbose = verbose;
@@ -150,7 +164,7 @@ int main(int argc, char *argv[]) {
     if (curr_px > allocated_px) {
       dirty_rgb = realloc(dirty_rgb, curr_px * 3);
       indexed = realloc(indexed, curr_px);
-      png_buf = realloc(png_buf, curr_px * 2);
+      png_buf = realloc(png_buf, curr_px * 4);
       allocated_px = curr_px;
     }
 
@@ -181,13 +195,25 @@ int main(int argc, char *argv[]) {
     }
 
     extract_dirty_rect(frame, fw, rect, dirty_rgb);
-    quantize_rgb(dirty_rgb, rect.w, rect.h, indexed, &pal);
-    double t4 = get_time_ms();
-    t_total_quant += (t4 - t3);
+    
+    size_t png_size = 0;
+    double t4, t5;
+    if (mode == MODE_INDEXED) {
+      quantize_rgb(dirty_rgb, rect.w, rect.h, indexed, &pal);
+      t4 = get_time_ms();
+      t_total_quant += (t4 - t3);
 
-    size_t png_size = png_encode_indexed(indexed, &pal, rect.w, rect.h, png_buf, allocated_px * 2);
-    double t5 = get_time_ms();
-    t_total_png += (t5 - t4);
+      png_size = png_encode_indexed(indexed, &pal, rect.w, rect.h, png_buf, allocated_px * 4);
+      t5 = get_time_ms();
+      t_total_png += (t5 - t4);
+    } else {
+      t4 = get_time_ms();
+      t_total_quant += (t4 - t3); // Quant time is 0 for RGB24
+
+      png_size = png_encode_rgb24(dirty_rgb, rect.w, rect.h, png_buf, allocated_px * 4);
+      t5 = get_time_ms();
+      t_total_png += (t5 - t4);
+    }
 
     if (png_size > 0) {
       kitty_render(&kitty, png_buf, png_size, &rect, fw, fh);

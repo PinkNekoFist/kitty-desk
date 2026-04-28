@@ -10,4 +10,8 @@ size_t png_encode_indexed(const uint8_t *indexed,
                           uint32_t w, uint32_t h,
                           uint8_t *dst, size_t dst_cap);
 
+size_t png_encode_rgb24(const uint8_t *rgb,
+                        uint32_t w, uint32_t h,
+                        uint8_t *dst, size_t dst_cap);
+
 #endif

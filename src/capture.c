@@ -80,11 +80,25 @@ static int create_shm_buffer(struct capture_ctx *ctx) {
 
 int capture_init(struct capture_ctx *ctx) {
     ctx->display = wl_display_connect(NULL);
-    if (!ctx->display) return -1;
+    if (!ctx->display) {
+        fprintf(stderr, "[error] wl_display_connect failed. Check if WAYLAND_DISPLAY is set.\n");
+        return -1;
+    }
     ctx->registry = wl_display_get_registry(ctx->display);
     wl_registry_add_listener(ctx->registry, &registry_listener, ctx);
     wl_display_roundtrip(ctx->display);
-    if (!ctx->shm || !ctx->output || !ctx->screencopy_manager) return -1;
+    if (!ctx->shm) {
+        fprintf(stderr, "[error] wl_shm protocol not found.\n");
+        return -1;
+    }
+    if (!ctx->output) {
+        fprintf(stderr, "[error] wl_output protocol not found.\n");
+        return -1;
+    }
+    if (!ctx->screencopy_manager) {
+        fprintf(stderr, "[error] wlr_screencopy protocol not found. Are you using a wlroots compositor (Hyprland/Sway)?\n");
+        return -1;
+    }
     return 0;
 }
 

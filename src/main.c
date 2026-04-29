@@ -101,12 +101,14 @@ int main(int argc, char *argv[]) {
   uint32_t target_w = 0, target_h = 0;
   bool scale_enabled = false, verbose = false;
   enum encode_mode mode = MODE_INDEXED;
+  int png_level = 1;
   static struct option long_options[] = {{"scale", required_argument, 0, 's'},
                                          {"verbose", no_argument, 0, 'v'},
                                          {"mode", required_argument, 0, 'm'},
+                                         {"level", required_argument, 0, 'l'},
                                          {0, 0, 0, 0}};
   int opt;
-  while ((opt = getopt_long(argc, argv, "s:vm:", long_options, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "s:vm:l:", long_options, NULL)) != -1) {
     if (opt == 's') {
       sscanf(optarg, "%ux%u", &target_w, &target_h);
       scale_enabled = true;
@@ -118,6 +120,8 @@ int main(int argc, char *argv[]) {
       } else {
         mode = MODE_INDEXED;
       }
+    } else if (opt == 'l') {
+      png_level = atoi(optarg);
     }
   }
 
@@ -185,9 +189,9 @@ int main(int argc, char *argv[]) {
 
     size_t png_size = 0;
     if (mode == MODE_INDEXED) {
-      png_size = png_encode_indexed(indexed, &pal, rect.w, rect.h, png_buf, allocated_px * 4);
+      png_size = png_encode_indexed(indexed, &pal, rect.w, rect.h, png_buf, allocated_px * 4, png_level);
     } else {
-      png_size = png_encode_rgb24(dirty_rgb, rect.w, rect.h, png_buf, allocated_px * 4);
+      png_size = png_encode_rgb24(dirty_rgb, rect.w, rect.h, png_buf, allocated_px * 4, png_level);
     }
     double t6 = get_time_ms();
     t_total_png += (t6 - t5);

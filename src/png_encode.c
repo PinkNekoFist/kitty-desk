@@ -22,7 +22,8 @@ static void membuf_flush(png_structp png) { (void)png; }
 size_t png_encode_indexed(const uint8_t *indexed,
                           const struct palette *pal,
                           uint32_t w, uint32_t h,
-                          uint8_t *dst, size_t dst_cap) {
+                          uint8_t *dst, size_t dst_cap,
+                          int level) {
     struct membuf buf = { dst, 0, dst_cap };
     png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png) return 0;
@@ -48,7 +49,7 @@ size_t png_encode_indexed(const uint8_t *indexed,
         plte[i].blue  = pal->b[i];
     }
     png_set_PLTE(png, info, plte, (int)pal->count);
-    png_set_compression_level(png, 1);
+    png_set_compression_level(png, level);
     png_write_info(png, info);
     for (uint32_t y = 0; y < h; y++) {
         png_write_row(png, (png_bytep)(indexed + y * w));
@@ -60,7 +61,8 @@ size_t png_encode_indexed(const uint8_t *indexed,
 
 size_t png_encode_rgb24(const uint8_t *rgb,
                         uint32_t w, uint32_t h,
-                        uint8_t *dst, size_t dst_cap) {
+                        uint8_t *dst, size_t dst_cap,
+                        int level) {
     struct membuf buf = { dst, 0, dst_cap };
     png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png) return 0;
@@ -79,7 +81,7 @@ size_t png_encode_rgb24(const uint8_t *rgb,
                  PNG_INTERLACE_NONE,
                  PNG_COMPRESSION_TYPE_DEFAULT,
                  PNG_FILTER_TYPE_DEFAULT);
-    png_set_compression_level(png, 1);
+    png_set_compression_level(png, level);
     png_write_info(png, info);
     for (uint32_t y = 0; y < h; y++) {
         png_write_row(png, (png_bytep)(rgb + y * w * 3));

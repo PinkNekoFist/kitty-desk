@@ -50,6 +50,8 @@ void kitty_init(struct kitty_ctx *ctx) {
     query_cell_size(&ctx->cell_w_px, &ctx->cell_h_px);
     ctx->proto_cap = 10 * 1024 * 1024;
     ctx->proto_buf = malloc(ctx->proto_cap);
+    ctx->enc_cap = 10 * 1024 * 1024;
+    ctx->enc_buf = malloc(ctx->enc_cap);
     fwrite(KITTY_SETUP, 1, strlen(KITTY_SETUP), stdout);
     fflush(stdout);
 }
@@ -58,6 +60,7 @@ void kitty_destroy(struct kitty_ctx *ctx) {
     fwrite(KITTY_TEARDOWN, 1, strlen(KITTY_TEARDOWN), stdout);
     fflush(stdout);
     free(ctx->proto_buf);
+    free(ctx->enc_buf);
 }
 
 static void append_proto(struct kitty_ctx *ctx, const char *data, size_t len) {
@@ -74,9 +77,12 @@ void kitty_render(struct kitty_ctx *ctx,
                   const struct dirty_rect *rect,
                   uint32_t full_w, uint32_t full_h) {
     (void)rect; (void)full_w; (void)full_h;
-    size_t enc_cap = 4 * ((png_size + 2) / 3) + 1;
-    char *enc_buf = malloc(enc_cap);
-    size_t enc_len = base64_encode(png_data, png_size, enc_buf);
+    size_t enc_req = 4 * ((png_size + 2) / 3) + 1;
+    if (enc_req > ctx->enc_cap) {
+        ctx->enc_cap = enc_req * 2;
+        ctx->enc_buf = realloc(ctx->enc_buf, ctx->enc_cap);
+    }
+    size_t enc_len = base64_encode(png_data, png_size, ctx->enc_buf);
 
     ctx->proto_len = 0;
     
@@ -120,7 +126,7 @@ void kitty_render(struct kitty_ctx *ctx,
         }
         
         append_proto(ctx, header, hlen);
-        append_proto(ctx, enc_buf + offset, chunk);
+        append_proto(ctx, ctx->enc_buf + offset, chunk);
         append_proto(ctx, "\033\\", 2);
         offset += chunk;
     }
@@ -136,6 +142,5 @@ void kitty_render(struct kitty_ctx *ctx,
     
     fwrite(ctx->proto_buf, 1, ctx->proto_len, stdout);
     fflush(stdout);
-    free(enc_buf);
     ctx->frame_number++;
 }

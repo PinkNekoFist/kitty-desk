@@ -15,6 +15,8 @@ struct kitty_ctx {
     char    *proto_buf;
     size_t   proto_cap;
     size_t   proto_len;
+    char    *enc_buf;
+    size_t   enc_cap;
 };
 
 void kitty_init(struct kitty_ctx *ctx);

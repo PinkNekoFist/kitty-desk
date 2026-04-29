@@ -143,7 +143,6 @@ int main(int argc, char *argv[]) {
   uint8_t *png_buf = NULL;
   uint32_t allocated_px = 0;
 
-  bool first = true;
   while (running) {
     double t0 = get_time_ms();
     if (capture_frame(&cap) < 0) break;
@@ -169,57 +168,34 @@ int main(int argc, char *argv[]) {
     }
 
     struct dirty_rect rect;
-    if (first) {
-      rect = (struct dirty_rect){0, 0, fw, fh, true};
-      first = false;
-    } else {
-      static uint8_t *scaled_prev = NULL;
-      if (scale_enabled) {
-        if (!scaled_prev) {
-          scaled_prev = malloc(target_w * target_h * 3);
-          memset(scaled_prev, 0, target_w * target_h * 3);
-        }
-        rect = diff_compute(scaled_prev, frame, fw, fh);
-        memcpy(scaled_prev, frame, target_w * target_h * 3);
-      } else {
-        rect = diff_compute(cap.rgb_prev, frame, fw, fh);
-        memcpy(cap.rgb_prev, frame, fw * fh * 3);
-      }
-    }
+    rect.x = 0; rect.y = 0;
+    rect.w = fw; rect.h = fh;
+
     double t3 = get_time_ms();
     t_total_diff += (t3 - t2);
 
-    if (rect.w == 0 || rect.h == 0) {
-        frame_count++;
-        continue;
-    }
-
     extract_dirty_rect(frame, fw, rect, dirty_rgb);
     
-    size_t png_size = 0;
-    double t4, t5;
+    double t4 = get_time_ms();
     if (mode == MODE_INDEXED) {
       quantize_rgb(dirty_rgb, rect.w, rect.h, indexed, &pal);
-      t4 = get_time_ms();
-      t_total_quant += (t4 - t3);
-
-      png_size = png_encode_indexed(indexed, &pal, rect.w, rect.h, png_buf, allocated_px * 4);
-      t5 = get_time_ms();
-      t_total_png += (t5 - t4);
-    } else {
-      t4 = get_time_ms();
-      t_total_quant += (t4 - t3); // Quant time is 0 for RGB24
-
-      png_size = png_encode_rgb24(dirty_rgb, rect.w, rect.h, png_buf, allocated_px * 4);
-      t5 = get_time_ms();
-      t_total_png += (t5 - t4);
     }
+    double t5 = get_time_ms();
+    t_total_quant += (t5 - t4);
+
+    size_t png_size = 0;
+    if (mode == MODE_INDEXED) {
+      png_size = png_encode_indexed(indexed, &pal, rect.w, rect.h, png_buf, allocated_px * 4);
+    } else {
+      png_size = png_encode_rgb24(dirty_rgb, rect.w, rect.h, png_buf, allocated_px * 4);
+    }
+    double t6 = get_time_ms();
+    t_total_png += (t6 - t5);
 
     if (png_size > 0) {
       kitty_render(&kitty, png_buf, png_size, &rect, fw, fh);
     }
-    double t6 = get_time_ms();
-    t_total_render += (t6 - t5);
+    t_total_render += (get_time_ms() - t6);
 
     frame_count++;
   }

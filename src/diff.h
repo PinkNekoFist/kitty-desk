@@ -7,7 +7,6 @@
 struct dirty_rect {
     uint32_t x, y;       // Top-left corner (pixels)
     uint32_t w, h;       // Width and height (pixels)
-    bool     full_frame; // true = full frame update
 };
 
 // Compute the dirty rect by comparing current and previous frames.

@@ -8,10 +8,9 @@
 struct dirty_rect diff_compute(const uint8_t *prev_rgb,
                                const uint8_t *curr_rgb,
                                uint32_t width, uint32_t height) {
-    struct dirty_rect rect = {0, 0, width, height, false};
+    struct dirty_rect rect = {0, 0, width, height};
     
     if (prev_rgb == NULL) {
-        rect.full_frame = true;
         return rect;
     }
 

@@ -35,6 +35,33 @@ static void query_cell_size(int *w, int *h) {
     }
 }
 
+static void *kitty_io_thread_fn(void *arg) {
+    struct kitty_ctx *ctx = (struct kitty_ctx *)arg;
+    while (true) {
+        pthread_mutex_lock(&ctx->io_mutex);
+        while (ctx->io_running && !ctx->io_data_ready) {
+            pthread_cond_wait(&ctx->io_cond, &ctx->io_mutex);
+        }
+        if (!ctx->io_running && !ctx->io_data_ready) {
+            pthread_mutex_unlock(&ctx->io_mutex);
+            break;
+        }
+
+        // Data is ready in io_buf
+        size_t len = ctx->io_len;
+        char *data = ctx->io_buf;
+        ctx->io_data_ready = false;
+        pthread_cond_signal(&ctx->io_cond); // Signal main thread that io_buf is being processed
+        pthread_mutex_unlock(&ctx->io_mutex);
+
+        if (len > 0) {
+            fwrite(data, 1, len, stdout);
+            fflush(stdout);
+        }
+    }
+    return NULL;
+}
+
 void kitty_init(struct kitty_ctx *ctx) {
     srand(time(NULL));
     ctx->kitty_id = rand() % 1000000 + 1;
@@ -48,8 +75,20 @@ void kitty_init(struct kitty_ctx *ctx) {
         ctx->screen_cols = 80;
     }
     query_cell_size(&ctx->cell_w_px, &ctx->cell_h_px);
+    
     ctx->proto_cap = 10 * 1024 * 1024;
     ctx->proto_buf = malloc(ctx->proto_cap);
+    
+    ctx->io_cap = 10 * 1024 * 1024;
+    ctx->io_buf = malloc(ctx->io_cap);
+    ctx->io_len = 0;
+    ctx->io_data_ready = false;
+    ctx->io_running = true;
+
+    pthread_mutex_init(&ctx->io_mutex, NULL);
+    pthread_cond_init(&ctx->io_cond, NULL);
+    pthread_create(&ctx->io_thread, NULL, kitty_io_thread_fn, ctx);
+
     ctx->enc_cap = 10 * 1024 * 1024;
     ctx->enc_buf = malloc(ctx->enc_cap);
     fwrite(KITTY_SETUP, 1, strlen(KITTY_SETUP), stdout);
@@ -57,9 +96,20 @@ void kitty_init(struct kitty_ctx *ctx) {
 }
 
 void kitty_destroy(struct kitty_ctx *ctx) {
+    pthread_mutex_lock(&ctx->io_mutex);
+    ctx->io_running = false;
+    pthread_cond_signal(&ctx->io_cond);
+    pthread_mutex_unlock(&ctx->io_mutex);
+    pthread_join(ctx->io_thread, NULL);
+
     fwrite(KITTY_TEARDOWN, 1, strlen(KITTY_TEARDOWN), stdout);
     fflush(stdout);
+
+    pthread_mutex_destroy(&ctx->io_mutex);
+    pthread_cond_destroy(&ctx->io_cond);
+
     free(ctx->proto_buf);
+    free(ctx->io_buf);
     free(ctx->enc_buf);
 }
 
@@ -140,7 +190,27 @@ void kitty_render(struct kitty_ctx *ctx,
         append_proto(ctx, anim, alen);
     }
     
-    fwrite(ctx->proto_buf, 1, ctx->proto_len, stdout);
-    fflush(stdout);
+    // Hand off to I/O thread
+    pthread_mutex_lock(&ctx->io_mutex);
+    while (ctx->io_data_ready) {
+        pthread_cond_wait(&ctx->io_cond, &ctx->io_mutex);
+    }
+
+    // Swap buffers
+    char *tmp_buf = ctx->io_buf;
+    size_t tmp_cap = ctx->io_cap;
+
+    ctx->io_buf = ctx->proto_buf;
+    ctx->io_cap = ctx->proto_cap;
+    ctx->io_len = ctx->proto_len;
+
+    ctx->proto_buf = tmp_buf;
+    ctx->proto_cap = tmp_cap;
+    ctx->proto_len = 0;
+
+    ctx->io_data_ready = true;
+    pthread_cond_signal(&ctx->io_cond);
+    pthread_mutex_unlock(&ctx->io_mutex);
+
     ctx->frame_number++;
 }

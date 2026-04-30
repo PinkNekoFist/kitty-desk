@@ -5,6 +5,9 @@
 #include <stddef.h>
 #include "diff.h"
 
+#include <pthread.h>
+#include <stdbool.h>
+
 struct kitty_ctx {
     long     kitty_id;
     int      frame_number;
@@ -12,9 +15,23 @@ struct kitty_ctx {
     int      screen_cols;
     int      cell_w_px;
     int      cell_h_px;
+
+    // Main thread buffer
     char    *proto_buf;
     size_t   proto_cap;
     size_t   proto_len;
+
+    // I/O thread buffer
+    char    *io_buf;
+    size_t   io_cap;
+    size_t   io_len;
+
+    pthread_t       io_thread;
+    pthread_mutex_t io_mutex;
+    pthread_cond_t  io_cond;
+    bool            io_running;
+    bool            io_data_ready;
+
     char    *enc_buf;
     size_t   enc_cap;
 };

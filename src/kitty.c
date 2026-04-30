@@ -122,6 +122,13 @@ static void append_proto(struct kitty_ctx *ctx, const char *data, size_t len) {
     ctx->proto_len += len;
 }
 
+bool kitty_is_ready(struct kitty_ctx *ctx) {
+    pthread_mutex_lock(&ctx->io_mutex);
+    bool ready = !ctx->io_data_ready;
+    pthread_mutex_unlock(&ctx->io_mutex);
+    return ready;
+}
+
 void kitty_render(struct kitty_ctx *ctx,
                   const uint8_t *png_data, size_t png_size,
                   const struct dirty_rect *rect,
@@ -197,8 +204,16 @@ void kitty_render(struct kitty_ctx *ctx,
     
     // Hand off to I/O thread
     pthread_mutex_lock(&ctx->io_mutex);
-    while (ctx->io_data_ready) {
-        pthread_cond_wait(&ctx->io_cond, &ctx->io_mutex);
+    if (ctx->io_data_ready) {
+        // If it's not the first frame, we can drop it to avoid blocking
+        if (ctx->frame_number > 0) {
+            pthread_mutex_unlock(&ctx->io_mutex);
+            return;
+        }
+        // For the very first frame, we must wait as it is essential for setup
+        while (ctx->io_data_ready) {
+            pthread_cond_wait(&ctx->io_cond, &ctx->io_mutex);
+        }
     }
 
     // Swap buffers

@@ -37,6 +37,7 @@ struct kitty_ctx {
 };
 
 void kitty_init(struct kitty_ctx *ctx);
+bool kitty_is_ready(struct kitty_ctx *ctx);
 void kitty_render(struct kitty_ctx *ctx,
                   const uint8_t *png_data, size_t png_size,
                   const struct dirty_rect *rect,

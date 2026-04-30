@@ -178,6 +178,13 @@ int main(int argc, char *argv[]) {
 
     extract_dirty_rect(frame, fw, rect, dirty_rgb);
     
+    // Check if the renderer is ready before doing heavy work
+    if (!kitty_is_ready(&kitty)) {
+        memcpy(prev_frame, frame, curr_px * 3);
+        frame_count++;
+        continue;
+    }
+
     // Scaling and Encoding
     struct dirty_rect scaled_rect = rect;
     uint32_t enc_w = rect.w;

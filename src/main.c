@@ -156,14 +156,7 @@ int main(int argc, char *argv[]) {
 
     uint8_t *frame = cap.rgb_curr;
     uint32_t fw = cap.width, fh = cap.height;
-    if (scale_enabled) {
-      if (!scale_buf) scale_buf = malloc(target_w * target_h * 3);
-      scale_rgb(cap.rgb_curr, cap.width, cap.height, scale_buf, target_w, target_h);
-      frame = scale_buf; fw = target_w; fh = target_h;
-    }
-    double t2 = get_time_ms();
-    t_total_scale += (t2 - t1);
-
+    
     uint32_t curr_px = fw * fh;
     if (curr_px > allocated_px) {
       prev_frame = realloc(prev_frame, curr_px * 3);
@@ -185,24 +178,56 @@ int main(int argc, char *argv[]) {
 
     extract_dirty_rect(frame, fw, rect, dirty_rgb);
     
+    // Scaling and Encoding
+    struct dirty_rect scaled_rect = rect;
+    uint32_t enc_w = rect.w;
+    uint32_t enc_h = rect.h;
+    uint8_t *enc_rgb = dirty_rgb;
+
+    if (scale_enabled) {
+        double sw = (double)target_w / fw;
+        double sh = (double)target_h / fh;
+        
+        scaled_rect.x = (uint32_t)(rect.x * sw);
+        scaled_rect.y = (uint32_t)(rect.y * sh);
+        scaled_rect.w = (uint32_t)(rect.w * sw);
+        scaled_rect.h = (uint32_t)(rect.h * sh);
+        
+        if (scaled_rect.w == 0) scaled_rect.w = 1;
+        if (scaled_rect.h == 0) scaled_rect.h = 1;
+
+        // Reuse scale_buf for the scaled dirty rect
+        if (!scale_buf) scale_buf = malloc(target_w * target_h * 3);
+        
+        double t_scale_start = get_time_ms();
+        scale_rgb(dirty_rgb, rect.w, rect.h, scale_buf, scaled_rect.w, scaled_rect.h);
+        t_total_scale += (get_time_ms() - t_scale_start);
+        
+        enc_w = scaled_rect.w;
+        enc_h = scaled_rect.h;
+        enc_rgb = scale_buf;
+    }
+
     double t4 = get_time_ms();
     if (mode == MODE_INDEXED) {
-      quantize_rgb(dirty_rgb, rect.w, rect.h, indexed, &pal);
+      quantize_rgb(enc_rgb, enc_w, enc_h, indexed, &pal);
     }
     double t5 = get_time_ms();
     t_total_quant += (t5 - t4);
 
     size_t png_size = 0;
     if (mode == MODE_INDEXED) {
-      png_size = png_encode_indexed(indexed, &pal, rect.w, rect.h, png_buf, allocated_px * 4, png_level);
+      png_size = png_encode_indexed(indexed, &pal, enc_w, enc_h, png_buf, allocated_px * 4, png_level);
     } else {
-      png_size = png_encode_rgb24(dirty_rgb, rect.w, rect.h, png_buf, allocated_px * 4, png_level);
+      png_size = png_encode_rgb24(enc_rgb, enc_w, enc_h, png_buf, allocated_px * 4, png_level);
     }
     double t6 = get_time_ms();
     t_total_png += (t6 - t5);
 
     if (png_size > 0) {
-      kitty_render(&kitty, png_buf, png_size, &rect, fw, fh);
+      uint32_t full_w = scale_enabled ? target_w : fw;
+      uint32_t full_h = scale_enabled ? target_h : fh;
+      kitty_render(&kitty, png_buf, png_size, &scaled_rect, full_w, full_h);
     }
     t_total_render += (get_time_ms() - t6);
 

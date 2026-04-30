@@ -34,6 +34,10 @@ struct kitty_ctx {
 
     char    *enc_buf;
     size_t   enc_cap;
+
+    // Stats for background I/O
+    double   t_total_io;
+    uint64_t io_count;
 };
 
 void kitty_init(struct kitty_ctx *ctx);

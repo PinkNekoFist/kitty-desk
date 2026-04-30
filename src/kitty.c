@@ -35,6 +35,12 @@ static void query_cell_size(int *w, int *h) {
     }
 }
 
+static double get_time_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0;
+}
+
 static void *kitty_io_thread_fn(void *arg) {
     struct kitty_ctx *ctx = (struct kitty_ctx *)arg;
     while (true) {
@@ -55,8 +61,11 @@ static void *kitty_io_thread_fn(void *arg) {
         pthread_mutex_unlock(&ctx->io_mutex);
 
         if (len > 0) {
+            double t_start = get_time_ms();
             fwrite(data, 1, len, stdout);
             fflush(stdout);
+            ctx->t_total_io += (get_time_ms() - t_start);
+            ctx->io_count++;
         }
     }
     return NULL;
@@ -66,6 +75,8 @@ void kitty_init(struct kitty_ctx *ctx) {
     srand(time(NULL));
     ctx->kitty_id = rand() % 1000000 + 1;
     ctx->frame_number = 0;
+    ctx->t_total_io = 0;
+    ctx->io_count = 0;
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
         ctx->screen_rows = ws.ws_row;

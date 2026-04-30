@@ -142,6 +142,7 @@ int main(int argc, char *argv[]) {
   quantize_init_static_palette(&pal);
 
   uint8_t *scale_buf = NULL;
+  uint8_t *prev_frame = NULL;
   uint8_t *dirty_rgb = NULL;
   uint8_t *indexed = NULL;
   uint8_t *png_buf = NULL;
@@ -165,18 +166,22 @@ int main(int argc, char *argv[]) {
 
     uint32_t curr_px = fw * fh;
     if (curr_px > allocated_px) {
+      prev_frame = realloc(prev_frame, curr_px * 3);
+      memset(prev_frame, 0, curr_px * 3); // Reset to ensure full diff on first frame after resize
       dirty_rgb = realloc(dirty_rgb, curr_px * 3);
       indexed = realloc(indexed, curr_px);
       png_buf = realloc(png_buf, curr_px * 4);
       allocated_px = curr_px;
     }
 
-    struct dirty_rect rect;
-    rect.x = 0; rect.y = 0;
-    rect.w = fw; rect.h = fh;
+    double t_diff_start = get_time_ms();
+    struct dirty_rect rect = diff_compute(frame_count == 0 ? NULL : prev_frame, frame, fw, fh);
+    t_total_diff += (get_time_ms() - t_diff_start);
 
-    double t3 = get_time_ms();
-    t_total_diff += (t3 - t2);
+    if (rect.w == 0 || rect.h == 0) {
+      frame_count++;
+      continue;
+    }
 
     extract_dirty_rect(frame, fw, rect, dirty_rgb);
     
@@ -201,10 +206,11 @@ int main(int argc, char *argv[]) {
     }
     t_total_render += (get_time_ms() - t6);
 
+    memcpy(prev_frame, frame, curr_px * 3);
     frame_count++;
   }
   
   final_cleanup();
-  free(scale_buf); free(dirty_rgb); free(indexed); free(png_buf);
+  free(scale_buf); free(prev_frame); free(dirty_rgb); free(indexed); free(png_buf);
   return 0;
 }

@@ -161,10 +161,15 @@ void kitty_render(struct kitty_ctx *ctx,
                     "\033_Ga=T,f=100,q=2,i=%ld,c=%d,r=%d,m=%d;",
                     ctx->kitty_id, ctx->screen_cols, ctx->screen_rows, more);
             } else {
-                // Subsequent frames: update content of frame 1
+                // Subsequent frames: update content of frame 1 at specific rect
+                // x,y: pixel position in image
+                // s,v: pixel size of the update area
+                // c=1: use frame 1 as canvas (preserve background)
+                // X=1: direct overwrite (no alpha blend)
                 hlen = snprintf(header, sizeof(header),
-                    "\033_Ga=f,r=1,i=%ld,f=100,q=2,m=%d;",
-                    ctx->kitty_id, more);
+                    "\033_Ga=f,r=1,i=%ld,f=100,q=2,"
+                    "x=%d,y=%d,s=%d,v=%d,c=1,X=1,m=%d;",
+                    ctx->kitty_id, rect->x, rect->y, rect->w, rect->h, more);
             }
             first_chunk = false;
         } else {

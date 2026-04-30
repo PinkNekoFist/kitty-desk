@@ -28,7 +28,9 @@ enum encode_mode {
 // Timing stats
 static double t_total_cap = 0, t_total_scale = 0, t_total_diff = 0;
 static double t_total_quant = 0, t_total_png = 0, t_total_render = 0;
+static double t_total_wait_io = 0;
 static uint64_t frame_count = 0;
+static uint64_t dropped_frames = 0;
 
 static double get_time_ms(void) {
     struct timespec ts;
@@ -47,26 +49,48 @@ static struct capture_ctx *g_cap = NULL;
 static struct kitty_ctx *g_kitty = NULL;
 
 static void final_cleanup(void) {
-    input_stop();
-    if (g_kitty) kitty_destroy(g_kitty);
-    if (g_cap) capture_destroy(g_cap);
-    restore_pty();
-    
-    if (frame_count > 0) {
-        fprintf(stderr, "\r\n=== Performance Summary (%lu frames) ===\r\n", frame_count);
-        fprintf(stderr, "Avg Capture: %.2f ms\r\n", t_total_cap / frame_count);
-        fprintf(stderr, "Avg Scale:   %.2f ms\r\n", t_total_scale / frame_count);
-        fprintf(stderr, "Avg Diff:    %.2f ms\r\n", t_total_diff / frame_count);
-        fprintf(stderr, "Avg Quant:   %.2f ms\r\n", t_total_quant / frame_count);
-        fprintf(stderr, "Avg PNG:     %.2f ms\r\n", t_total_png / frame_count);
-        fprintf(stderr, "Avg Render:  %.2f ms\r\n", t_total_render / frame_count);
-        double avg_total = (t_total_cap + t_total_scale + t_total_diff + t_total_quant + t_total_png + t_total_render) / frame_count;
-        fprintf(stderr, "Avg Total:   %.2f ms (%.1f FPS)\r\n", avg_total, 1000.0 / avg_total);
-        fprintf(stderr, "========================================\r\n");
-    }
-    fflush(stderr);
-}
+    static bool cleaning_up = false;
+    if (cleaning_up) return;
+    cleaning_up = true;
 
+    input_stop();
+
+    double io_total = 0;
+    uint64_t io_count = 0;
+    if (g_kitty) {
+        io_total = g_kitty->t_total_io;
+        io_count = g_kitty->io_count;
+        kitty_destroy(g_kitty);
+        g_kitty = NULL;
+    }
+
+    if (frame_count > 0) {
+        fprintf(stderr, "\r\n=== Performance Summary (%lu frames, %lu dropped) ===\r\n", frame_count, dropped_frames);
+        fprintf(stderr, "Avg Capture:  %.2f ms\r\n", t_total_cap / frame_count);
+        fprintf(stderr, "Avg Scale:    %.2f ms\r\n", t_total_scale / frame_count);
+        fprintf(stderr, "Avg Diff:     %.2f ms\r\n", t_total_diff / frame_count);
+        fprintf(stderr, "Avg Quant:    %.2f ms\r\n", t_total_quant / frame_count);
+        fprintf(stderr, "Avg PNG:      %.2f ms\r\n", t_total_png / frame_count);
+        fprintf(stderr, "Avg Render:   %.2f ms (Wait I/O: %.2f ms)\r\n", 
+                t_total_render / frame_count, t_total_wait_io / frame_count);
+
+        if (io_count > 0) {
+            fprintf(stderr, "Avg BG I/O:   %.2f ms (Write/Flush to terminal)\r\n", 
+                    io_total / io_count);
+        }
+
+        double avg_total = (t_total_cap + t_total_scale + t_total_diff + t_total_quant + t_total_png + t_total_render + t_total_wait_io) / frame_count;
+        fprintf(stderr, "Avg Total:    %.2f ms (%.1f FPS)\r\n", avg_total, 1000.0 / avg_total);
+        fprintf(stderr, "========================================\r\n");
+        fflush(stderr);
+    }
+
+    if (g_cap) {
+        capture_destroy(g_cap);
+        g_cap = NULL;
+    }
+    restore_pty();
+}
 static void on_sigint(int sig) { (void)sig; running = false; }
 
 static void on_sigsegv(int sig) {
@@ -180,6 +204,7 @@ int main(int argc, char *argv[]) {
     
     // Check if the renderer is ready before doing heavy work
     if (!kitty_is_ready(&kitty)) {
+        dropped_frames++;
         memcpy(prev_frame, frame, curr_px * 3);
         frame_count++;
         continue;
@@ -230,13 +255,15 @@ int main(int argc, char *argv[]) {
     }
     double t6 = get_time_ms();
     t_total_png += (t6 - t5);
+    t_total_render += (t6 - t4);
 
     if (png_size > 0) {
       uint32_t full_w = scale_enabled ? target_w : fw;
       uint32_t full_h = scale_enabled ? target_h : fh;
+      double t_render_start = get_time_ms();
       kitty_render(&kitty, png_buf, png_size, &scaled_rect, full_w, full_h);
+      t_total_wait_io += (get_time_ms() - t_render_start);
     }
-    t_total_render += (get_time_ms() - t6);
 
     memcpy(prev_frame, frame, curr_px * 3);
     frame_count++;

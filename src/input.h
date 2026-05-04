@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// 啟動 input thread，從 STDIN_FILENO 讀 KKP sequence 並注入
+// Start input thread, read KKP sequences from STDIN_FILENO and inject them
 int  input_start(uint32_t screen_w, uint32_t screen_h, bool verbose);
 void input_stop(void);
 

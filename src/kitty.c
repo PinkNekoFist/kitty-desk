@@ -13,14 +13,16 @@ static const char KITTY_SETUP[] =
     "\033[2J"
     "\033[H"
     "\033[?25l"
+    "\033]22;none\033\\"
     "\033[?1003h"
-    "\033[?1006h"
+    "\033[?1016h"
     "\033[>11u";
 
 static const char KITTY_TEARDOWN[] =
     "\033[<u"
+    "\033]22;\033\\"
+    "\033[?1016l"
     "\033[?1003l"
-    "\033[?1006l"
     "\033[?25h"
     "\033[?1049l";
 
@@ -154,6 +156,10 @@ void kitty_render(struct kitty_ctx *ctx,
 
     ctx->proto_len = 0;
     
+    // Periodically re-send hide sequences to ensure they persist over SSH/multiplexers
+    const char *hide_all = "\033[?25l\033]22;none\a";
+    append_proto(ctx, hide_all, strlen(hide_all));
+
     if (ctx->frame_number == 0) {
         // Initial setup: move cursor to top-left and clear all images
         const char *reset = "\033[H\033_Ga=d,d=a;\033\\";

@@ -1,4 +1,4 @@
-# kitty-desktop (kgp-remote)
+# kitty-desktop
 
 A client-less remote desktop tool designed for the **Kitty terminal**. It captures a Wayland desktop and renders it directly into your terminal window using the **Kitty Graphics Protocol**.
 
@@ -33,7 +33,7 @@ The main philosophy of `kitty-desktop` is simplicity and portability: you don't 
 
 2. **Build:**
    ```bash
-   make
+   make clean && make
    ```
    This produces the `kgp-remote` binary.
 

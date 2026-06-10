@@ -1,8 +1,8 @@
-# kitty-desktop
+# kitty-desk
 
 A client-less remote desktop tool designed for the **Kitty terminal**. It captures a Wayland desktop and renders it directly into your terminal window using the **Kitty Graphics Protocol**.
 
-The main philosophy of `kitty-desktop` is simplicity and portability: you don't need to install any specialized client software on your local machine. If you have the Kitty terminal, you can access your remote desktop immediately.
+The main philosophy of `kitty-desk` is simplicity and portability: you don't need to install any specialized client software on your local machine. If you have the Kitty terminal, you can access your remote desktop immediately.
 
 ## Features
 
@@ -27,8 +27,8 @@ The main philosophy of `kitty-desktop` is simplicity and portability: you don't 
 
 1. **Clone the repository on the remote machine:**
    ```bash
-   git clone https://github.com/PinkNekoFist/kitty-desktop.git
-   cd kitty-desktop
+   git clone https://github.com/PinkNekoFist/kitty-desk.git
+   cd kitty-desk
    ```
 
 2. **Build:**

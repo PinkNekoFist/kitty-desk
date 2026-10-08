@@ -1,10 +1,12 @@
-#include <stdint.h>
-#include <stddef.h>
 #include "base64.h"
+#include <stddef.h>
+#include <stdint.h>
 
-static const char base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char base64_table[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-size_t base64_encode(const uint8_t *src, size_t src_len, char *dst) {
+size_t base64_encode(const uint8_t *src, size_t src_len, char *dst)
+{
     size_t i = 0, j = 0;
     while (i < src_len) {
         uint32_t octet_a = i < src_len ? src[i++] : 0;

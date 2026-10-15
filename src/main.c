@@ -132,6 +132,69 @@ static void setup_pty(void)
     }
 }
 
+static void list_outputs(const struct capture_ctx *cap)
+{
+    for (int i = 0; i < cap->output_count; i++) {
+        const struct capture_output *out = &cap->outputs[i];
+        fprintf(stderr, "  %d) %-10s %dx%d  %s\r\n", i + 1, out->name,
+                out->width, out->height, out->description);
+    }
+}
+
+// Asks the user to pick an output with a single key press. Runs before
+// kitty_init, so the PTY is raw but the Kitty keyboard protocol is not yet
+// enabled and digits arrive as plain bytes. Returns the index, or -1 to quit.
+static int prompt_output(const struct capture_ctx *cap)
+{
+    int selectable = cap->output_count < 9 ? cap->output_count : 9;
+    fprintf(stderr, "Select output:\r\n");
+    list_outputs(cap);
+    if (cap->output_count > 9)
+        fprintf(stderr, "(use -o <name> for outputs past 9)\r\n");
+    fprintf(stderr, "Press 1-%d, or q to quit: ", selectable);
+    fflush(stderr);
+
+    for (;;) {
+        unsigned char c;
+        if (read(STDIN_FILENO, &c, 1) <= 0)
+            return -1;
+        // 0x03 is Ctrl+C, which arrives as a byte in raw mode
+        if (c == 'q' || c == 'Q' || c == 0x03)
+            break;
+        if (c >= '1' && c < '1' + selectable) {
+            fprintf(stderr, "%c\r\n", c);
+            return c - '1';
+        }
+    }
+    fprintf(stderr, "\r\n");
+    return -1;
+}
+
+// Resolves which output to capture: -o name, the only output, or a prompt.
+// Returns the index, or -1 on error/quit.
+static int choose_output(const struct capture_ctx *cap, const char *name)
+{
+    if (name) {
+        int idx = capture_find_output(cap, name);
+        if (idx < 0) {
+            fprintf(stderr, "[error] No output named \"%s\". Available:\r\n",
+                    name);
+            list_outputs(cap);
+        }
+        return idx;
+    }
+    if (cap->output_count == 1)
+        return 0;
+    if (!isatty(STDIN_FILENO)) {
+        fprintf(stderr,
+                "[error] Multiple outputs found; use -o <name> to pick one "
+                "(stdin is not a terminal, so cannot prompt):\r\n");
+        list_outputs(cap);
+        return -1;
+    }
+    return prompt_output(cap);
+}
+
 int main(int argc, char *argv[])
 {
     setup_pty();
@@ -143,13 +206,16 @@ int main(int argc, char *argv[])
     bool scale_enabled = false, verbose = false;
     enum encode_mode mode = MODE_INDEXED;
     int png_level = 1;
-    static struct option long_options[] = {{"scale", required_argument, 0, 's'},
-                                           {"verbose", no_argument, 0, 'v'},
-                                           {"mode", required_argument, 0, 'm'},
-                                           {"level", required_argument, 0, 'l'},
-                                           {0, 0, 0, 0}};
+    const char *output_name = NULL;
+    static struct option long_options[] = {
+        {"scale", required_argument, 0, 's'},
+        {"verbose", no_argument, 0, 'v'},
+        {"mode", required_argument, 0, 'm'},
+        {"level", required_argument, 0, 'l'},
+        {"output", required_argument, 0, 'o'},
+        {0, 0, 0, 0}};
     int opt;
-    while ((opt = getopt_long(argc, argv, "s:vm:l:", long_options, NULL)) !=
+    while ((opt = getopt_long(argc, argv, "s:vm:l:o:", long_options, NULL)) !=
            -1) {
         if (opt == 's') {
             sscanf(optarg, "%ux%u", &target_w, &target_h);
@@ -164,6 +230,8 @@ int main(int argc, char *argv[])
             }
         } else if (opt == 'l') {
             png_level = atoi(optarg);
+        } else if (opt == 'o') {
+            output_name = optarg;
         }
     }
 
@@ -175,6 +243,19 @@ int main(int argc, char *argv[])
         restore_pty();
         return 1;
     }
+
+    int output_idx = choose_output(&cap, output_name);
+    if (output_idx < 0) {
+        capture_destroy(&cap);
+        g_cap = NULL;
+        restore_pty();
+        return 1;
+    }
+    capture_select_output(&cap, output_idx);
+    if (verbose)
+        fprintf(stderr, "[capture] output %s (%s)\r\n",
+                cap.outputs[output_idx].name,
+                cap.outputs[output_idx].description);
 
     struct kitty_ctx kitty = {0};
     g_kitty = &kitty;

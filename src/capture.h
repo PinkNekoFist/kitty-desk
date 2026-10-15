@@ -6,10 +6,24 @@
 #include <wayland-client.h>
 #include "wlr-screencopy-unstable-v1-client-protocol.h"
 
+#define CAPTURE_MAX_OUTPUTS 16
+
+struct capture_output {
+    struct wl_output *wl_output;
+    // e.g. "DP-1" (wl_output v4), else "output-N"
+    char name[64];
+    char description[128];
+    // Current mode, in physical pixels
+    int32_t width, height;
+};
+
 struct capture_ctx {
     struct wl_display *display;
     struct wl_registry *registry;
     struct wl_shm *shm;
+    struct capture_output outputs[CAPTURE_MAX_OUTPUTS];
+    int output_count;
+    // Selected output, set by capture_select_output
     struct wl_output *output;
     struct zwlr_screencopy_manager_v1 *screencopy_manager;
     int fd;
@@ -25,7 +39,11 @@ struct capture_ctx {
     bool verbose;
 };
 
+// Connects to Wayland and enumerates outputs into ctx->outputs.
 int capture_init(struct capture_ctx *ctx);
+void capture_select_output(struct capture_ctx *ctx, int index);
+// Returns the index of the output named `name`, or -1.
+int capture_find_output(const struct capture_ctx *ctx, const char *name);
 int capture_frame(struct capture_ctx *ctx);
 void capture_destroy(struct capture_ctx *ctx);
 

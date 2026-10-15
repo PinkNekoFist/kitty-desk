@@ -37,6 +37,30 @@ The main philosophy of `kitty-desk` is simplicity and portability: you don't nee
    ```
    This produces the `kgp-remote` binary.
 
+3. **Set up input injection (`ydotool`):**
+   `kgp-remote` sends your keyboard and mouse input to the desktop through the `ydotoold` daemon. Without it the desktop still displays, but input silently does nothing. Do this once on the remote machine:
+
+   1. Give your user access to `/dev/uinput`. The ydotool package's udev rule makes the device belong to the `input` group, so add yourself to it, then log out and back in:
+      ```bash
+      sudo usermod -aG input $USER
+      ```
+   2. Start the daemon as your user and have it start at every login:
+      ```bash
+      systemctl --user enable --now ydotool
+      ```
+      If this reports `Unit ydotool.service not found`, your package doesn't ship the unit (or the file is missing; on Arch, `sudo pacman -S ydotool` restores it). In that case, start `ydotoold` from your compositor's autostart instead. For Hyprland, add this to `hyprland.lua`:
+      ```lua
+      hl.on("hyprland.start", function()
+          hl.exec_cmd("ydotoold")
+      end)
+      ```
+      On older Hyprland versions that use `hyprland.conf`, add `exec-once = ydotoold` instead.
+   3. Check that it works. This should move your pointer to near the top-left of the screen:
+      ```bash
+      ydotool mousemove --absolute 100 100
+      ```
+      `failed to connect socket ... Please check if ydotoold is running` means step 2 didn't take effect.
+
 ## Usage
 
 Run the binary on the remote machine via SSH from inside Kitty. The `-t` flag is required: `kgp-remote` needs a real PTY to switch the terminal into raw mode and to read the window size.
@@ -83,4 +107,4 @@ When the program exits, it prints a performance summary to stderr: the average t
 
 - **No capture / `wl_display_connect failed`:** Set `WAYLAND_DISPLAY` to the compositor's socket (see [Usage](#usage)) and check that the compositor supports `wlr-screencopy` (wlroots-based: Hyprland, Sway, etc.). GNOME and KDE don't support it.
 - **Keys echo locally / nothing responds / image is the wrong size:** You probably ran `ssh` without `-t`.
-- **Input not working:** Ensure `ydotoold` is running on the remote host and the user has appropriate permissions.
+- **Input not working (picture is fine, but keys and clicks do nothing):** `ydotoold` isn't running or can't open `/dev/uinput`. Follow [step 3 of Installation](#installation) and run its check command. `Ctrl + Alt + Q` still works without `ydotoold`, because `kgp-remote` handles it itself.

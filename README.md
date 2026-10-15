@@ -106,5 +106,9 @@ When the program exits, it prints a performance summary to stderr: the average t
 ## Troubleshooting
 
 - **No capture / `wl_display_connect failed`:** Set `WAYLAND_DISPLAY` to the compositor's socket (see [Usage](#usage)) and check that the compositor supports `wlr-screencopy` (wlroots-based: Hyprland, Sway, etc.). GNOME and KDE don't support it.
+- **No capture on Hyprland with permissions enforced:** If `ecosystem.enforce_permissions` is enabled, Hyprland gates screen capture per program. A program that isn't allowed is either denied or triggers a permission prompt on the remote screen, where nobody is around to answer it over SSH. Allow `kgp-remote` in `hyprland.lua` (replace `/path/to/kgp-remote` with the full path to your `kgp-remote` binary), then restart Hyprland, because permission changes aren't applied on the fly:
+  ```lua
+  hl.permission("/path/to/kgp-remote", "screencopy", "allow")
+  ```
 - **Keys echo locally / nothing responds / image is the wrong size:** You probably ran `ssh` without `-t`.
 - **Input not working (picture is fine, but keys and clicks do nothing):** `ydotoold` isn't running or can't open `/dev/uinput`. Follow [step 3 of Installation](#installation) and run its check command. `Ctrl + Alt + Q` still works without `ydotoold`, because `kgp-remote` handles it itself.

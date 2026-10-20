@@ -8,6 +8,90 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+static void output_geometry(void *data,
+                            struct wl_output *wl_output,
+                            int32_t x,
+                            int32_t y,
+                            int32_t physical_width,
+                            int32_t physical_height,
+                            int32_t subpixel,
+                            const char *make,
+                            const char *model,
+                            int32_t transform)
+{
+    (void) wl_output;
+    (void) x;
+    (void) y;
+    (void) physical_width;
+    (void) physical_height;
+    (void) subpixel;
+    (void) transform;
+    struct capture_output *out = data;
+    // Fallback description for wl_output < v4; the description event
+    // (v4) overwrites it.
+    if (out->description[0] == '\0')
+        snprintf(out->description, sizeof(out->description), "%s %s", make,
+                 model);
+}
+
+static void output_mode(void *data,
+                        struct wl_output *wl_output,
+                        uint32_t flags,
+                        int32_t width,
+                        int32_t height,
+                        int32_t refresh)
+{
+    (void) wl_output;
+    (void) refresh;
+    struct capture_output *out = data;
+    if (flags & WL_OUTPUT_MODE_CURRENT) {
+        out->width = width;
+        out->height = height;
+    }
+}
+
+static void output_done(void *data, struct wl_output *wl_output)
+{
+    (void) data;
+    (void) wl_output;
+}
+
+static void output_scale(void *data,
+                         struct wl_output *wl_output,
+                         int32_t factor)
+{
+    (void) data;
+    (void) wl_output;
+    (void) factor;
+}
+
+static void output_name(void *data,
+                        struct wl_output *wl_output,
+                        const char *name)
+{
+    (void) wl_output;
+    struct capture_output *out = data;
+    snprintf(out->name, sizeof(out->name), "%s", name);
+}
+
+static void output_description(void *data,
+                               struct wl_output *wl_output,
+                               const char *description)
+{
+    (void) wl_output;
+    struct capture_output *out = data;
+    snprintf(out->description, sizeof(out->description), "%s", description);
+}
+
+static const struct wl_output_listener output_listener = {
+    .geometry = output_geometry,
+    .mode = output_mode,
+    .done = output_done,
+    .scale = output_scale,
+    .name = output_name,
+    .description = output_description,
+};
+
 static void handle_global(void *data,
                           struct wl_registry *registry,
                           uint32_t name,
@@ -18,9 +102,16 @@ static void handle_global(void *data,
     if (strcmp(interface, wl_shm_interface.name) == 0) {
         ctx->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
-        if (!ctx->output) {
-            ctx->output =
-                wl_registry_bind(registry, name, &wl_output_interface, 1);
+        if (ctx->output_count < CAPTURE_MAX_OUTPUTS) {
+            struct capture_output *out = &ctx->outputs[ctx->output_count];
+            // v4 adds the name ("DP-1") and description events
+            uint32_t bind_ver = version < 4 ? version : 4;
+            out->wl_output = wl_registry_bind(registry, name,
+                                              &wl_output_interface, bind_ver);
+            snprintf(out->name, sizeof(out->name), "output-%d",
+                     ctx->output_count + 1);
+            wl_output_add_listener(out->wl_output, &output_listener, out);
+            ctx->output_count++;
         }
     } else if (strcmp(interface, zwlr_screencopy_manager_v1_interface.name) ==
                0) {
@@ -121,10 +212,12 @@ int capture_init(struct capture_ctx *ctx)
         fprintf(stderr, "[error] wl_shm protocol not found.\n");
         return -1;
     }
-    if (!ctx->output) {
+    if (ctx->output_count == 0) {
         fprintf(stderr, "[error] wl_output protocol not found.\n");
         return -1;
     }
+    // Second roundtrip delivers the outputs' name/description/mode events
+    wl_display_roundtrip(ctx->display);
     if (!ctx->screencopy_manager) {
         fprintf(stderr,
                 "[error] wlr_screencopy protocol not found. Are you using a "
@@ -144,8 +237,8 @@ void capture_destroy(struct capture_ctx *ctx)
         zwlr_screencopy_manager_v1_destroy(ctx->screencopy_manager);
     if (ctx->shm)
         wl_shm_destroy(ctx->shm);
-    if (ctx->output)
-        wl_output_destroy(ctx->output);
+    for (int i = 0; i < ctx->output_count; i++)
+        wl_output_destroy(ctx->outputs[i].wl_output);
     if (ctx->registry)
         wl_registry_destroy(ctx->registry);
     if (ctx->display)
@@ -154,6 +247,20 @@ void capture_destroy(struct capture_ctx *ctx)
         free(ctx->rgb_curr);
     if (ctx->rgb_prev)
         free(ctx->rgb_prev);
+}
+
+void capture_select_output(struct capture_ctx *ctx, int index)
+{
+    ctx->output = ctx->outputs[index].wl_output;
+}
+
+int capture_find_output(const struct capture_ctx *ctx, const char *name)
+{
+    for (int i = 0; i < ctx->output_count; i++) {
+        if (strcmp(ctx->outputs[i].name, name) == 0)
+            return i;
+    }
+    return -1;
 }
 
 int capture_frame(struct capture_ctx *ctx)

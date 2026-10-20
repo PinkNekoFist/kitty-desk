@@ -82,6 +82,7 @@ ssh -t user@remote-host "WAYLAND_DISPLAY=wayland-1 /path/to/kgp-remote [options]
 | `-m, --mode <mode>` | `indexed` | `indexed`: 8-bit PNG using a fixed 256-colour palette (6×6×6 colour cube + 40 greys). Smaller and faster, but gradients and photos will band. `rgb24`: full-colour PNG. Any other value falls back to `indexed`. |
 | `-l, --level <0-9>` | `1` | zlib compression level for the PNG. Higher is smaller but slower to encode. |
 | `-v, --verbose` | off | Log parsed keyboard and mouse events to stderr. |
+| `-o, --output <name>` | first monitor | Monitor to capture, by its compositor name (e.g. `-o DP-2`; `hyprctl monitors` lists them). If no monitor has that name, `kgp-remote` exits with an error. |
 
 When the program exits, it prints a performance summary to stderr: the average time spent in each stage (capture, scale, diff, quantize, PNG, render, terminal I/O), the effective FPS, and the number of dropped frames. Use it to tune `-s`, `-m` and `-l` for your link.
 
@@ -93,7 +94,7 @@ When the program exits, it prints a performance summary to stderr: the average t
 ## Known Limitations
 
 - **Mouse position mapping:** Mouse coordinates are sent as the terminal's pixel coordinates and passed to `ydotool` unchanged. They are not scaled to the remote screen, and `-s` doesn't affect them. Clicks land where you point only when the Kitty window's pixel size matches the remote screen's resolution. Otherwise the pointer drifts the further you move from the top-left corner.
-- **Single monitor:** Only the first output the compositor reports is captured. On multi-monitor setups you can't choose which one.
+- **Mouse on multi-monitor setups:** Mouse coordinates aren't offset by the captured monitor's position in the layout, so clicks can land on the wrong monitor. Which monitor they reach depends on how `ydotool mousemove --absolute` resolves positions in your layout; this hasn't been tested yet.
 - **Pixel format:** Captured frames are assumed to be 32-bit BGRX/BGRA with no row padding. Compositors that hand out other formats or padded strides will show garbled output.
 
 ## How It Works

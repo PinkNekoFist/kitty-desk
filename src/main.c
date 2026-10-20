@@ -132,6 +132,18 @@ static void setup_pty(void)
     }
 }
 
+// Resolves which output to capture: -o name, else the first output.
+// Returns the index, or -1 if no output has that name.
+static int choose_output(const struct capture_ctx *cap, const char *name)
+{
+    if (!name)
+        return 0;
+    int idx = capture_find_output(cap, name);
+    if (idx < 0)
+        fprintf(stderr, "[error] No output named \"%s\".\r\n", name);
+    return idx;
+}
+
 int main(int argc, char *argv[])
 {
     setup_pty();
@@ -143,13 +155,16 @@ int main(int argc, char *argv[])
     bool scale_enabled = false, verbose = false;
     enum encode_mode mode = MODE_INDEXED;
     int png_level = 1;
-    static struct option long_options[] = {{"scale", required_argument, 0, 's'},
-                                           {"verbose", no_argument, 0, 'v'},
-                                           {"mode", required_argument, 0, 'm'},
-                                           {"level", required_argument, 0, 'l'},
-                                           {0, 0, 0, 0}};
+    const char *output_name = NULL;
+    static struct option long_options[] = {
+        {"scale", required_argument, 0, 's'},
+        {"verbose", no_argument, 0, 'v'},
+        {"mode", required_argument, 0, 'm'},
+        {"level", required_argument, 0, 'l'},
+        {"output", required_argument, 0, 'o'},
+        {0, 0, 0, 0}};
     int opt;
-    while ((opt = getopt_long(argc, argv, "s:vm:l:", long_options, NULL)) !=
+    while ((opt = getopt_long(argc, argv, "s:vm:l:o:", long_options, NULL)) !=
            -1) {
         if (opt == 's') {
             sscanf(optarg, "%ux%u", &target_w, &target_h);
@@ -164,6 +179,8 @@ int main(int argc, char *argv[])
             }
         } else if (opt == 'l') {
             png_level = atoi(optarg);
+        } else if (opt == 'o') {
+            output_name = optarg;
         }
     }
 
@@ -175,6 +192,19 @@ int main(int argc, char *argv[])
         restore_pty();
         return 1;
     }
+
+    int output_idx = choose_output(&cap, output_name);
+    if (output_idx < 0) {
+        capture_destroy(&cap);
+        g_cap = NULL;
+        restore_pty();
+        return 1;
+    }
+    capture_select_output(&cap, output_idx);
+    if (verbose)
+        fprintf(stderr, "[capture] output %s (%s)\r\n",
+                cap.outputs[output_idx].name,
+                cap.outputs[output_idx].description);
 
     struct kitty_ctx kitty = {0};
     g_kitty = &kitty;

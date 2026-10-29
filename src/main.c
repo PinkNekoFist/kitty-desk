@@ -181,6 +181,13 @@ int main(int argc, char *argv[])
             png_level = atoi(optarg);
         } else if (opt == 'o') {
             output_name = optarg;
+        } else {
+            fprintf(stderr,
+                    "\rUsage: %s [-s WxH] [-m indexed|rgb24] [-l 0-9] "
+                    "[-o name] [-v]\r\n",
+                    argv[0]);
+            restore_pty();
+            return 1;
         }
     }
 
